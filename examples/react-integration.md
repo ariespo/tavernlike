@@ -57,81 +57,48 @@ export const useSillytavernStore = create((set, get) => ({
 }));
 ```
 
-### 4. 聊天组件
+### 4. 聊天组件（使用 `useSillytavern` Hook）
 
 ```tsx
 // components/Chat.tsx
 import { useState } from 'react';
-import { useSillytavernStore } from '../stores/sillytavern';
-import { assemblePrompt } from '../sillytavern/prompt-assembler';
-import { createLorebookEngine } from '../sillytavern/lorebook-engine';
+import { useSillytavern } from '../hooks/useSillytavern';
 
 export function Chat() {
-  const [messages, setMessages] = useState([]);
+  const { activeChat, isSending, sendMessage } = useSillytavern();
   const [input, setInput] = useState('');
-  const { lorebooks, activeLorebookIds, settings } = useSillytavernStore();
 
-  const sendMessage = async () => {
-    // 1. 获取激活的世界书
-    const activeLorebooks = lorebooks.filter(b => 
-      activeLorebookIds.includes(b.id)
-    );
-
-    // 2. 扫描关键词匹配
-    const matchedEntries = activeLorebooks.flatMap(book => {
-      const engine = createLorebookEngine(book);
-      return engine.scan(input);
-    });
-
-    // 3. 获取当前预设
-    const activePreset = presets.find(p => p.id === settings?.activePresetId) || presets[0];
-
-    // 4. 组装提示词
-    const { messages: promptMessages } = assemblePrompt({
-      userInput: input,
-      history: messages,
-      preset: activePreset,
-      lorebooks: activeLorebooks,
-      userName: settings?.userName || '用户',
-      characterName: settings?.characterName || 'AI',
-    });
-
-    // 5. 调用 API
-    const response = await fetch(settings.api.baseUrl + '/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${settings.api.apiKey}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        model: settings.api.model,
-        messages: promptMessages
-      })
-    });
-
-    const data = await response.json();
-    
-    // 6. 更新消息
-    setMessages([...messages, 
-      { role: 'user', content: input },
-      { role: 'assistant', content: data.choices[0].message.content }
-    ]);
+  const handleSend = async () => {
+    if (!input.trim() || isSending) return;
+    await sendMessage(input);
+    setInput('');
   };
+
+  if (!activeChat) {
+    return <div className="chat-empty">选择一个聊天或创建新对话</div>;
+  }
 
   return (
     <div className="chat">
       <div className="messages">
-        {messages.map((msg, i) => (
-          <div key={i} className={msg.role}>
-            {msg.content}
+        {activeChat.messages.map((msg) => (
+          <div key={msg.id} className={`message ${msg.role}`}>
+            <div className="bubble">{msg.content}</div>
           </div>
         ))}
       </div>
-      <input 
-        value={input}
-        onChange={e => setInput(e.target.value)}
-        onKeyPress={e => e.key === 'Enter' && sendMessage()}
-      />
+      <div className="input-bar">
+        <input
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+          disabled={isSending}
+          placeholder="输入消息..."
+        />
+        <button onClick={handleSend} disabled={isSending}>
+          {isSending ? '发送中...' : '发送'}
+        </button>
+      </div>
     </div>
   );
 }
@@ -146,13 +113,22 @@ import { useSillytavernStore } from '../stores/sillytavern';
 import { LorebookModal } from './LorebookModal';
 import { PresetModal } from './PresetModal';
 import { SettingsModal } from './SettingsModal';
+import { ChatModal } from './ChatModal';
 
 export function TopBar() {
   const [activeModal, setActiveModal] = useState(null);
-  const { lorebooks, activeLorebookIds, presets } = useSillytavernStore();
+  const { lorebooks, activeLorebookIds, presets, chats } = useSillytavernStore();
 
   return (
     <header className="top-bar">
+      {/* 聊天按钮 */}
+      <button onClick={() => setActiveModal('chat')}>
+        💬 聊天
+        {chats.length > 0 && (
+          <span className="badge">{chats.length}</span>
+        )}
+      </button>
+
       {/* 创意工坊按钮 */}
       <button onClick={() => setActiveModal('lorebook')}>
         🏛️ 创意工坊
@@ -172,8 +148,11 @@ export function TopBar() {
       </button>
 
       {/* Modals */}
+      {activeModal === 'chat' && (
+        <ChatModal onClose={() => setActiveModal(null)} />
+      )}
       {activeModal === 'lorebook' && (
-        <LorebookModal 
+        <LorebookModal
           lorebooks={lorebooks}
           activeIds={activeLorebookIds}
           onClose={() => setActiveModal(null)}

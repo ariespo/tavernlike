@@ -847,7 +847,9 @@ import {
   getLorebooks, saveLorebook, deleteLorebook,
   getPresets, savePreset, deletePreset,
   getSettings, saveSettings, initializeDatabase,
-  type Lorebook, type ChatPreset, type AppSettings,
+  getChats, saveChat, deleteChat as deleteChatById,
+  assemblePrompt,
+  type Lorebook, type ChatPreset, type AppSettings, type ChatSession, type ChatMessage,
 } from '../sillytavern';
 
 export function useSillytavern() {
@@ -855,6 +857,9 @@ export function useSillytavern() {
   const [presets, setPresets] = useState<ChatPreset[]>([]);
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [activeLorebookIds, setActiveLorebookIds] = useState<string[]>([]);
+  const [chats, setChats] = useState<ChatSession[]>([]);
+  const [activeChatId, setActiveChatId] = useState<string | null>(null);
+  const [isSending, setIsSending] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
@@ -864,13 +869,16 @@ export function useSillytavern() {
   const loadAll = async () => {
     setIsLoading(true);
     await initializeDatabase();
-    const [l, p, s] = await Promise.all([getLorebooks(), getPresets(), getSettings()]);
+    const [l, p, s, c] = await Promise.all([getLorebooks(), getPresets(), getSettings(), getChats()]);
     setLorebooks(l);
     setPresets(p);
     setSettings(s || null);
     setActiveLorebookIds(s?.activeLorebookIds || []);
+    setChats(c);
     setIsLoading(false);
   };
+
+  const activeChat = chats.find(c => c.id === activeChatId) || null;
 
   const toggleLorebook = useCallback(async (id: string) => {
     const newIds = activeLorebookIds.includes(id)
@@ -891,9 +899,100 @@ export function useSillytavern() {
     setSettings(newSettings);
   }, [settings]);
 
+  const createChat = useCallback(async (name?: string) => {
+    if (!settings) throw new Error('Settings not loaded');
+    const chatCount = chats.filter(c => c.characterName === settings.characterName).length;
+    const chatName = name || `${settings.characterName} - 新对话 ${chatCount + 1}`;
+    const newChat: ChatSession = {
+      id: crypto.randomUUID(),
+      name: chatName,
+      messages: [],
+      characterName: settings.characterName,
+      userName: settings.userName,
+      presetId: settings.activePresetId || presets[0]?.id || null,
+      lorebookIds: [...activeLorebookIds],
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    await saveChat(newChat);
+    setChats(prev => [...prev, newChat]);
+    setActiveChatId(newChat.id);
+    return newChat.id;
+  }, [chats, settings, presets, activeLorebookIds]);
+
+  const loadChat = useCallback((id: string) => {
+    setActiveChatId(id);
+  }, []);
+
+  const deleteChat = useCallback(async (id: string) => {
+    await deleteChatById(id);
+    setChats(prev => prev.filter(c => c.id !== id));
+    if (activeChatId === id) setActiveChatId(null);
+  }, [activeChatId]);
+
+  const sendMessage = useCallback(async (content: string) => {
+    if (!settings || !activeChat) {
+      throw new Error('No active chat or settings not loaded');
+    }
+    setIsSending(true);
+
+    try {
+      const activePreset = presets.find(p => p.id === settings.activePresetId) || presets[0];
+      if (!activePreset) throw new Error('No preset available');
+
+      const activeBooks = lorebooks.filter(b => activeLorebookIds.includes(b.id));
+
+      const userMessage: ChatMessage = {
+        id: crypto.randomUUID(),
+        role: 'user',
+        content,
+        timestamp: Date.now(),
+      };
+
+      const updatedMessages = [...activeChat.messages, userMessage];
+      let updatedChat = { ...activeChat, messages: updatedMessages, updatedAt: Date.now() };
+
+      const { messages: promptMessages } = assemblePrompt({
+        userInput: content,
+        history: updatedMessages,
+        preset: activePreset,
+        lorebooks: activeBooks,
+        userName: settings.userName,
+        characterName: settings.characterName,
+      });
+
+      const response = await fetch(settings.api.baseUrl + '/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${settings.api.apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ model: settings.api.model, messages: promptMessages }),
+      });
+
+      if (!response.ok) throw new Error(`API error: ${response.status}`);
+
+      const data = await response.json();
+      const reply = data.choices?.[0]?.message?.content || '';
+
+      const assistantMessage: ChatMessage = {
+        id: crypto.randomUUID(),
+        role: 'assistant',
+        content: reply,
+        timestamp: Date.now(),
+      };
+
+      updatedChat = { ...updatedChat, messages: [...updatedChat.messages, assistantMessage] };
+      await saveChat(updatedChat);
+      setChats(prev => prev.map(c => c.id === updatedChat.id ? updatedChat : c));
+    } finally {
+      setIsSending(false);
+    }
+  }, [activeChat, settings, presets, lorebooks, activeLorebookIds]);
+
   return {
-    lorebooks, presets, settings, activeLorebookIds, isLoading,
-    loadAll, toggleLorebook, updateSettings,
+    lorebooks, presets, settings, activeLorebookIds, chats, activeChatId, activeChat, isSending, isLoading,
+    loadAll, toggleLorebook, updateSettings, createChat, loadChat, deleteChat, sendMessage,
     saveLorebook, deleteLorebook, savePreset, deletePreset,
   };
 }
@@ -911,7 +1010,9 @@ import {
   getLorebooks, saveLorebook, deleteLorebook,
   getPresets, savePreset, deletePreset,
   getSettings, saveSettings, initializeDatabase,
-  type Lorebook, type ChatPreset, type AppSettings,
+  getChats, saveChat, deleteChat as deleteChatById,
+  assemblePrompt,
+  type Lorebook, type ChatPreset, type AppSettings, type ChatSession, type ChatMessage,
 } from '../sillytavern';
 
 export function useSillytavern() {
@@ -919,6 +1020,9 @@ export function useSillytavern() {
   const presets = ref<ChatPreset[]>([]);
   const settings = ref<AppSettings | null>(null);
   const activeLorebookIds = ref<string[]>([]);
+  const chats = ref<ChatSession[]>([]);
+  const activeChatId = ref<string | null>(null);
+  const isSending = ref(false);
   const isLoading = ref(true);
 
   onMounted(() => {
@@ -928,13 +1032,16 @@ export function useSillytavern() {
   const loadAll = async () => {
     isLoading.value = true;
     await initializeDatabase();
-    const [l, p, s] = await Promise.all([getLorebooks(), getPresets(), getSettings()]);
+    const [l, p, s, c] = await Promise.all([getLorebooks(), getPresets(), getSettings(), getChats()]);
     lorebooks.value = l;
     presets.value = p;
     settings.value = s || null;
     activeLorebookIds.value = s?.activeLorebookIds || [];
+    chats.value = c;
     isLoading.value = false;
   };
+
+  const activeChat = computed(() => chats.value.find(c => c.id === activeChatId.value) || null);
 
   const toggleLorebook = async (id: string) => {
     const newIds = activeLorebookIds.value.includes(id)
@@ -955,15 +1062,114 @@ export function useSillytavern() {
     settings.value = newSettings;
   };
 
+  const createChat = async (name?: string) => {
+    if (!settings.value) throw new Error('Settings not loaded');
+    const chatCount = chats.value.filter(c => c.characterName === settings.value.characterName).length;
+    const chatName = name || `${settings.value.characterName} - 新对话 ${chatCount + 1}`;
+    const newChat: ChatSession = {
+      id: crypto.randomUUID(),
+      name: chatName,
+      messages: [],
+      characterName: settings.value.characterName,
+      userName: settings.value.userName,
+      presetId: settings.value.activePresetId || presets.value[0]?.id || null,
+      lorebookIds: [...activeLorebookIds.value],
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    await saveChat(newChat);
+    chats.value = [...chats.value, newChat];
+    activeChatId.value = newChat.id;
+    return newChat.id;
+  };
+
+  const loadChat = (id: string) => {
+    activeChatId.value = id;
+  };
+
+  const deleteChat = async (id: string) => {
+    await deleteChatById(id);
+    chats.value = chats.value.filter(c => c.id !== id);
+    if (activeChatId.value === id) activeChatId.value = null;
+  };
+
+  const sendMessage = async (content: string) => {
+    if (!settings.value || !activeChat.value) {
+      throw new Error('No active chat or settings not loaded');
+    }
+    isSending.value = true;
+
+    try {
+      const activePreset = presets.value.find(p => p.id === settings.value.activePresetId) || presets.value[0];
+      if (!activePreset) throw new Error('No preset available');
+
+      const activeBooks = lorebooks.value.filter(b => activeLorebookIds.value.includes(b.id));
+
+      const userMessage: ChatMessage = {
+        id: crypto.randomUUID(),
+        role: 'user',
+        content,
+        timestamp: Date.now(),
+      };
+
+      const updatedMessages = [...activeChat.value.messages, userMessage];
+      let updatedChat = { ...activeChat.value, messages: updatedMessages, updatedAt: Date.now() };
+
+      const { messages: promptMessages } = assemblePrompt({
+        userInput: content,
+        history: updatedMessages,
+        preset: activePreset,
+        lorebooks: activeBooks,
+        userName: settings.value.userName,
+        characterName: settings.value.characterName,
+      });
+
+      const response = await fetch(settings.value.api.baseUrl + '/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${settings.value.api.apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ model: settings.value.api.model, messages: promptMessages }),
+      });
+
+      if (!response.ok) throw new Error(`API error: ${response.status}`);
+
+      const data = await response.json();
+      const reply = data.choices?.[0]?.message?.content || '';
+
+      const assistantMessage: ChatMessage = {
+        id: crypto.randomUUID(),
+        role: 'assistant',
+        content: reply,
+        timestamp: Date.now(),
+      };
+
+      updatedChat = { ...updatedChat, messages: [...updatedChat.messages, assistantMessage] };
+      await saveChat(updatedChat);
+      chats.value = chats.value.map(c => c.id === updatedChat.id ? updatedChat : c);
+    } finally {
+      isSending.value = false;
+    }
+  };
+
   return {
     lorebooks: computed(() => lorebooks.value),
     presets: computed(() => presets.value),
     settings: computed(() => settings.value),
     activeLorebookIds: computed(() => activeLorebookIds.value),
+    chats: computed(() => chats.value),
+    activeChatId: computed(() => activeChatId.value),
+    activeChat,
+    isSending: computed(() => isSending.value),
     isLoading: computed(() => isLoading.value),
     loadAll,
     toggleLorebook,
     updateSettings,
+    createChat,
+    loadChat,
+    deleteChat,
+    sendMessage,
     saveLorebook,
     deleteLorebook,
     savePreset,
@@ -977,17 +1183,266 @@ export function useSillytavern() {
 ```vue
 <template>
   <div>
-    <button @click="showSettings = true">
-      设置 ({{ activeLorebookIds.length }} 世界书)
+    <button @click="showChatModal = true">
+      聊天 ({{ chats.length }})
     </button>
+    <ChatModal v-if="showChatModal" @close="showChatModal = false" />
+    <Chat />
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
+import { ref } from 'vue';
 import { useSillytavern } from './composables/useSillytavern';
+import Chat from './components/SillyTavern/Chat.vue';
+import ChatModal from './components/SillyTavern/ChatModal.vue';
 
-const { lorebooks, settings, activeLorebookIds, toggleLorebook } = useSillytavern();
+const { chats } = useSillytavern();
+const showChatModal = ref(false);
+</script>
+```
+
+---
+
+## UI Components
+
+### React — Chat.tsx
+
+```tsx
+import { useState } from 'react';
+import { useSillytavern } from '../../hooks/useSillytavern';
+
+export function Chat() {
+  const { activeChat, isSending, sendMessage } = useSillytavern();
+  const [input, setInput] = useState('');
+
+  const handleSend = async () => {
+    if (!input.trim() || isSending) return;
+    await sendMessage(input);
+    setInput('');
+  };
+
+  if (!activeChat) {
+    return <div className="chat-empty">选择一个聊天或创建新对话</div>;
+  }
+
+  return (
+    <div className="chat">
+      <div className="messages">
+        {activeChat.messages.map((msg) => (
+          <div key={msg.id} className={`message ${msg.role}`}>
+            <div className="bubble">{msg.content}</div>
+          </div>
+        ))}
+      </div>
+      <div className="input-bar">
+        <input
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+          disabled={isSending}
+          placeholder="输入消息..."
+        />
+        <button onClick={handleSend} disabled={isSending}>
+          {isSending ? '发送中...' : '发送'}
+        </button>
+      </div>
+    </div>
+  );
+}
+```
+
+### React — ChatModal.tsx
+
+```tsx
+import { useSillytavern } from '../../hooks/useSillytavern';
+
+interface ChatModalProps {
+  onClose: () => void;
+}
+
+export function ChatModal({ onClose }: ChatModalProps) {
+  const { chats, activeChatId, createChat, loadChat, deleteChat } = useSillytavern();
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <header>
+          <h3>聊天记录</h3>
+          <button onClick={onClose}>关闭</button>
+        </header>
+        <div className="chat-list">
+          <button onClick={() => createChat()}>+ 新对话</button>
+          <ul>
+            {chats.map((chat) => (
+              <li
+                key={chat.id}
+                className={chat.id === activeChatId ? 'active' : ''}
+                onClick={() => loadChat(chat.id)}
+              >
+                <span>{chat.name}</span>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    deleteChat(chat.id);
+                  }}
+                >
+                  删除
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+    </div>
+  );
+}
+```
+
+### Vue — Chat.vue
+
+```vue
+<template>
+  <div class="chat">
+    <div v-if="!activeChat" class="chat-empty">
+      选择一个聊天或创建新对话
+    </div>
+    <template v-else>
+      <div class="messages">
+        <div
+          v-for="msg in activeChat.messages"
+          :key="msg.id"
+          :class="['message', msg.role]"
+        >
+          <div class="bubble">{{ msg.content }}</div>
+        </div>
+      </div>
+      <div class="input-bar">
+        <input
+          v-model="input"
+          @keydown.enter="handleSend"
+          :disabled="isSending"
+          placeholder="输入消息..."
+        />
+        <button @click="handleSend" :disabled="isSending">
+          {{ isSending ? '发送中...' : '发送' }}
+        </button>
+      </div>
+    </template>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { ref } from 'vue';
+import { useSillytavern } from '../../composables/useSillytavern';
+
+const { activeChat, isSending, sendMessage } = useSillytavern();
+const input = ref('');
+
+const handleSend = async () => {
+  if (!input.value.trim() || isSending.value) return;
+  await sendMessage(input.value);
+  input.value = '';
+};
+</script>
+```
+
+### Vue — ChatModal.vue
+
+```vue
+<template>
+  <div class="modal-overlay" @click="emit('close')">
+    <div class="modal" @click.stop>
+      <header>
+        <h3>聊天记录</h3>
+        <button @click="emit('close')">关闭</button>
+      </header>
+      <div class="chat-list">
+        <button @click="createChat()">+ 新对话</button>
+        <ul>
+          <li
+            v-for="chat in chats"
+            :key="chat.id"
+            :class="{ active: chat.id === activeChatId }"
+            @click="loadChat(chat.id)"
+          >
+            <span>{{ chat.name }}</span>
+            <button @click.stop="deleteChat(chat.id)">删除</button>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { useSillytavern } from '../../composables/useSillytavern';
+
+const { chats, activeChatId, createChat, loadChat, deleteChat } = useSillytavern();
+const emit = defineEmits<{ close: [] }>();
+</script>
+```
+
+### Vanilla 使用示例
+
+```html
+<div id="app">
+  <button id="chat-modal-btn">聊天</button>
+  <div id="chat-modal" style="display:none;">
+    <button id="new-chat">+ 新对话</button>
+    <ul id="chat-list"></ul>
+  </div>
+  <div id="chat-view">
+    <div id="messages"></div>
+    <input id="msg-input" placeholder="输入消息..." />
+    <button id="send-btn">发送</button>
+  </div>
+</div>
+
+<script type="module">
+  import { sillytavernStore } from './sillytavern';
+
+  await sillytavernStore.loadAll();
+
+  const renderChats = () => {
+    const list = document.getElementById('chat-list');
+    const { chats, activeChatId, activeChat } = sillytavernStore;
+    list.innerHTML = chats.map(c => `
+      <li class="${c.id === activeChatId ? 'active' : ''}" data-id="${c.id}">
+        ${c.name} <button class="del" data-id="${c.id}">删除</button>
+      </li>
+    `).join('');
+
+    const msgs = document.getElementById('messages');
+    msgs.innerHTML = activeChat
+      ? activeChat.messages.map(m => `<div class="${m.role}">${m.content}</div>`).join('')
+      : '<div>选择一个聊天或创建新对话</div>';
+  };
+
+  sillytavernStore.subscribe(renderChats);
+  renderChats();
+
+  document.getElementById('new-chat').onclick = () => sillytavernStore.createChat();
+  document.getElementById('chat-modal-btn').onclick = () => {
+    const el = document.getElementById('chat-modal');
+    el.style.display = el.style.display === 'none' ? 'block' : 'none';
+  };
+
+  document.getElementById('chat-list').onclick = (e) => {
+    const li = e.target.closest('li');
+    if (e.target.classList.contains('del')) {
+      sillytavernStore.deleteChat(e.target.dataset.id);
+    } else if (li) {
+      sillytavernStore.loadChat(li.dataset.id);
+    }
+  };
+
+  document.getElementById('send-btn').onclick = async () => {
+    const input = document.getElementById('msg-input');
+    if (!input.value.trim() || sillytavernStore.isSending) return;
+    await sillytavernStore.sendMessage(input.value);
+    input.value = '';
+  };
 </script>
 ```
 
@@ -1002,7 +1457,9 @@ import {
   getLorebooks, saveLorebook, deleteLorebook,
   getPresets, savePreset, deletePreset,
   getSettings, saveSettings, initializeDatabase,
-  type Lorebook, type ChatPreset, type AppSettings,
+  getChats, saveChat, deleteChat as deleteChatById,
+  assemblePrompt,
+  type Lorebook, type ChatPreset, type AppSettings, type ChatSession, type ChatMessage,
 } from '../sillytavern';
 
 type Listener = () => void;
@@ -1012,6 +1469,9 @@ export function createSillytavernStore() {
   let presets: ChatPreset[] = [];
   let settings: AppSettings | null = null;
   let activeLorebookIds: string[] = [];
+  let chats: ChatSession[] = [];
+  let activeChatId: string | null = null;
+  let isSending = false;
   let isLoading = true;
   const listeners = new Set<Listener>();
 
@@ -1021,11 +1481,12 @@ export function createSillytavernStore() {
     isLoading = true;
     notify();
     await initializeDatabase();
-    const [l, p, s] = await Promise.all([getLorebooks(), getPresets(), getSettings()]);
+    const [l, p, s, c] = await Promise.all([getLorebooks(), getPresets(), getSettings(), getChats()]);
     lorebooks = l;
     presets = p;
     settings = s || null;
     activeLorebookIds = s?.activeLorebookIds || [];
+    chats = c;
     isLoading = false;
     notify();
   };
@@ -1051,6 +1512,103 @@ export function createSillytavernStore() {
     notify();
   };
 
+  const createChat = async (name?: string) => {
+    if (!settings) throw new Error('Settings not loaded');
+    const chatCount = chats.filter(c => c.characterName === settings.characterName).length;
+    const chatName = name || `${settings.characterName} - 新对话 ${chatCount + 1}`;
+    const newChat: ChatSession = {
+      id: crypto.randomUUID(),
+      name: chatName,
+      messages: [],
+      characterName: settings.characterName,
+      userName: settings.userName,
+      presetId: settings.activePresetId || presets[0]?.id || null,
+      lorebookIds: [...activeLorebookIds],
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    await saveChat(newChat);
+    chats = [...chats, newChat];
+    activeChatId = newChat.id;
+    notify();
+    return newChat.id;
+  };
+
+  const loadChat = (id: string) => {
+    activeChatId = id;
+    notify();
+  };
+
+  const deleteChat = async (id: string) => {
+    await deleteChatById(id);
+    chats = chats.filter(c => c.id !== id);
+    if (activeChatId === id) activeChatId = null;
+    notify();
+  };
+
+  const sendMessage = async (content: string) => {
+    if (!settings || !activeChatId) throw new Error('No active chat or settings not loaded');
+    const activeChat = chats.find(c => c.id === activeChatId);
+    if (!activeChat) throw new Error('Active chat not found');
+
+    isSending = true;
+    notify();
+
+    try {
+      const activePreset = presets.find(p => p.id === settings.activePresetId) || presets[0];
+      if (!activePreset) throw new Error('No preset available');
+
+      const activeBooks = lorebooks.filter(b => activeLorebookIds.includes(b.id));
+
+      const userMessage: ChatMessage = {
+        id: crypto.randomUUID(),
+        role: 'user',
+        content,
+        timestamp: Date.now(),
+      };
+
+      const updatedMessages = [...activeChat.messages, userMessage];
+      let updatedChat = { ...activeChat, messages: updatedMessages, updatedAt: Date.now() };
+
+      const { messages: promptMessages } = assemblePrompt({
+        userInput: content,
+        history: updatedMessages,
+        preset: activePreset,
+        lorebooks: activeBooks,
+        userName: settings.userName,
+        characterName: settings.characterName,
+      });
+
+      const response = await fetch(settings.api.baseUrl + '/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${settings.api.apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ model: settings.api.model, messages: promptMessages }),
+      });
+
+      if (!response.ok) throw new Error(`API error: ${response.status}`);
+
+      const data = await response.json();
+      const reply = data.choices?.[0]?.message?.content || '';
+
+      const assistantMessage: ChatMessage = {
+        id: crypto.randomUUID(),
+        role: 'assistant',
+        content: reply,
+        timestamp: Date.now(),
+      };
+
+      updatedChat = { ...updatedChat, messages: [...updatedChat.messages, assistantMessage] };
+      await saveChat(updatedChat);
+      chats = chats.map(c => c.id === updatedChat.id ? updatedChat : c);
+    } finally {
+      isSending = false;
+      notify();
+    }
+  };
+
   const subscribe = (cb: Listener) => {
     listeners.add(cb);
     return () => listeners.delete(cb);
@@ -1061,10 +1619,18 @@ export function createSillytavernStore() {
     get presets() { return presets; },
     get settings() { return settings; },
     get activeLorebookIds() { return activeLorebookIds; },
+    get chats() { return chats; },
+    get activeChatId() { return activeChatId; },
+    get activeChat() { return chats.find(c => c.id === activeChatId) || null; },
+    get isSending() { return isSending; },
     get isLoading() { return isLoading; },
     loadAll,
     toggleLorebook,
     updateSettings,
+    createChat,
+    loadChat,
+    deleteChat,
+    sendMessage,
     saveLorebook,
     deleteLorebook,
     savePreset,
@@ -1075,23 +1641,6 @@ export function createSillytavernStore() {
 
 export const sillytavernStore = createSillytavernStore();
 ```
-
-### Vanilla 使用示例
-
-```html
-<script type="module">
-  import { sillytavernStore, assemblePrompt } from './sillytavern';
-
-  await sillytavernStore.loadAll();
-
-  sillytavernStore.subscribe(() => {
-    const { settings, activeLorebookIds } = sillytavernStore;
-    document.getElementById('badge').textContent = activeLorebookIds.length;
-  });
-</script>
-```
-
----
 
 ## Execution Steps
 
@@ -1123,8 +1672,11 @@ When user runs `/sillytavern-web`:
    - Framework integration file (React: `src/hooks/useSillytavern.ts`, Vue: `src/composables/useSillytavern.ts`, Vanilla: `src/vanilla/sillytavern-store.ts`)
 
 5. **Create UI Components** (Auto - generate based on framework)
+   - React: `SettingsModal.tsx`, `LorebookModal.tsx`, `PresetModal.tsx`, `ChatModal.tsx`, `Chat.tsx`
+   - Vue: `SettingsModal.vue`, `LorebookModal.vue`, `PresetModal.vue`, `ChatModal.vue`, `Chat.vue`
+   - Vanilla: inline example for settings/lorebook/preset/chat UI
 
-6. **Show Integration Example** (Auto - display usage code for detected framework)
+6. **Show Integration Example** (Auto - display usage code for detected framework, including multi-session chat)
 
 ---
 
@@ -1138,6 +1690,8 @@ After installation, verify:
 - [ ] App compiles successfully
 - [ ] Settings modal opens
 - [ ] Can import SillyTavern JSON
+- [ ] Can create/load/delete chat sessions
+- [ ] Messages persist in IndexedDB across reloads
 
 ---
 
@@ -1150,4 +1704,5 @@ After installation, verify:
 - Prompt assembly with context injection (respects preset block order)
 - SillyTavern format import/export
 - Framework-specific state management (React hooks / Vue composables / Vanilla store)
-- Ready-to-use UI components
+- Multi-session chat with full IndexedDB persistence
+- Ready-to-use UI components (including Chat and Chat Session manager)
