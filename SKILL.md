@@ -673,7 +673,7 @@ export function assemblePrompt(options: AssembleOptions): AssembleResult {
 
   // Fallback: append history and user input if their blocks weren't configured
   if (!sortedBlocks.some(b => b.id === DEFAULT_PROMPT_BLOCKS.CHAT_HISTORY)) {
-    const userIdx = assembledMessages.findIndex(m => m.role === 'user');
+    const userIdx = assembledMessages.findIndex(m => m.role === USER_ROLE);
     if (userIdx === -1) {
       assembledMessages.push(...recentHistory);
     } else {
@@ -889,6 +889,44 @@ export function formatVariablesForPrompt(variables: Record<string, string | numb
   const lines = entries.map(([k, v]) => `${k}: ${v}`);
   return `[当前状态]\n${lines.join('\n')}`;
 }
+
+export const USER_ROLE = 'user' as const;
+
+/** Truncate chat at message index and restore variables from the last remaining message (or provided snapshot). */
+export function truncateChatAt(
+  chat: ChatSession,
+  index: number,
+  variables?: Record<string, string | number>
+): ChatSession {
+  const truncated = chat.messages.slice(0, index);
+  const restoredVars = variables ?? truncated[truncated.length - 1]?.variables ?? {};
+  return { ...chat, messages: truncated, variables: restoredVars, updatedAt: Date.now() };
+}
+
+/** Create a branched chat session from a message index (inclusive). */
+export function branchChat(
+  source: ChatSession,
+  index: number,
+  options: {
+    name: string;
+    presetId: string | null;
+    lorebookIds: string[];
+    variables?: Record<string, string | number>;
+  }
+): ChatSession {
+  return {
+    id: crypto.randomUUID(),
+    name: options.name,
+    messages: source.messages.slice(0, index + 1).map(m => ({ ...m })),
+    characterName: source.characterName,
+    userName: source.userName,
+    presetId: options.presetId,
+    lorebookIds: [...options.lorebookIds],
+    variables: options.variables ?? source.messages[index].variables ?? {},
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  };
+}
 ```
 
 ---
@@ -904,7 +942,7 @@ import {
   getPresets, savePreset, deletePreset,
   getSettings, saveSettings, initializeDatabase,
   getChats, saveChat, deleteChat as deleteChatById,
-  assemblePrompt, extractVariables, mergeVariables,
+  assemblePrompt, extractVariables, mergeVariables, USER_ROLE, truncateChatAt, branchChat,
   type Lorebook, type ChatPreset, type AppSettings, type ChatSession, type ChatMessage,
 } from '../sillytavern';
 
@@ -978,8 +1016,9 @@ export function useSillytavern() {
   }, [chats, settings, presets, activeLorebookIds]);
 
   const loadChat = useCallback((id: string) => {
+    if (activeChatId === id) return;
     setActiveChatId(id);
-  }, []);
+  }, [activeChatId]);
 
   const deleteChat = useCallback(async (id: string) => {
     await deleteChatById(id);
@@ -1061,21 +1100,13 @@ export function useSillytavern() {
     }
   }, [activeChat, settings, presets, lorebooks, activeLorebookIds]);
 
-  const editMessage = useCallback(async (messageId: string, newContent: string) =>> {
+  const editMessage = useCallback(async (messageId: string, newContent: string) => {
     if (!activeChat) return;
     const idx = activeChat.messages.findIndex(m => m.id === messageId);
     if (idx === -1) return;
-    const target = activeChat.messages[idx];
-    if (target.role !== 'user') return;
+    if (activeChat.messages[idx].role !== USER_ROLE) return;
 
-    const truncated = activeChat.messages.slice(0, idx);
-    const restoredVars = target.variables || {};
-    const updatedChat: ChatSession = {
-      ...activeChat,
-      messages: truncated,
-      variables: restoredVars,
-      updatedAt: Date.now(),
-    };
+    const updatedChat = truncateChatAt(activeChat, idx, activeChat.messages[idx].variables);
     await saveChat(updatedChat);
     setChats(prev => prev.map(c => c.id === updatedChat.id ? updatedChat : c));
     await sendMessage(newContent);
@@ -1085,15 +1116,9 @@ export function useSillytavern() {
     if (!activeChat) return;
     const idx = activeChat.messages.findIndex(m => m.id === messageId);
     if (idx === -1) return;
-    const truncated = activeChat.messages.slice(0, idx);
-    const lastMsg = truncated[truncated.length - 1];
-    const restoredVars = lastMsg?.variables || {};
-    const updatedChat: ChatSession = {
-      ...activeChat,
-      messages: truncated,
-      variables: restoredVars,
-      updatedAt: Date.now(),
-    };
+
+    // Restore variables to the state of the last remaining message.
+    const updatedChat = truncateChatAt(activeChat, idx);
     await saveChat(updatedChat);
     setChats(prev => prev.map(c => c.id === updatedChat.id ? updatedChat : c));
   }, [activeChat]);
@@ -1102,21 +1127,15 @@ export function useSillytavern() {
     if (!activeChat || !settings) throw new Error('No active chat');
     const idx = activeChat.messages.findIndex(m => m.id === messageId);
     if (idx === -1) throw new Error('Message not found');
+
     const branchCount = chats.filter(c => c.characterName === settings.characterName).length;
     const branchName = name || `${settings.characterName} - 分支 ${branchCount + 1}`;
-    const snapshotVars = activeChat.messages[idx].variables || {};
-    const newChat: ChatSession = {
-      id: crypto.randomUUID(),
+    const newChat = branchChat(activeChat, idx, {
       name: branchName,
-      messages: activeChat.messages.slice(0, idx + 1).map(m => ({ ...m })),
-      characterName: settings.characterName,
-      userName: settings.userName,
       presetId: settings.activePresetId || presets[0]?.id || null,
       lorebookIds: [...activeLorebookIds],
-      variables: snapshotVars,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    };
+      variables: activeChat.messages[idx].variables,
+    });
     await saveChat(newChat);
     setChats(prev => [...prev, newChat]);
     setActiveChatId(newChat.id);
@@ -1145,7 +1164,7 @@ import {
   getPresets, savePreset, deletePreset,
   getSettings, saveSettings, initializeDatabase,
   getChats, saveChat, deleteChat as deleteChatById,
-  assemblePrompt, extractVariables, mergeVariables,
+  assemblePrompt, extractVariables, mergeVariables, USER_ROLE, truncateChatAt, branchChat,
   type Lorebook, type ChatPreset, type AppSettings, type ChatSession, type ChatMessage,
 } from '../sillytavern';
 
@@ -1219,6 +1238,7 @@ export function useSillytavern() {
   };
 
   const loadChat = (id: string) => {
+    if (activeChatId.value === id) return;
     activeChatId.value = id;
   };
 
@@ -1306,17 +1326,9 @@ export function useSillytavern() {
     if (!activeChat.value) return;
     const idx = activeChat.value.messages.findIndex(m => m.id === messageId);
     if (idx === -1) return;
-    const target = activeChat.value.messages[idx];
-    if (target.role !== 'user') return;
+    if (activeChat.value.messages[idx].role !== USER_ROLE) return;
 
-    const truncated = activeChat.value.messages.slice(0, idx);
-    const restoredVars = target.variables || {};
-    const updatedChat: ChatSession = {
-      ...activeChat.value,
-      messages: truncated,
-      variables: restoredVars,
-      updatedAt: Date.now(),
-    };
+    const updatedChat = truncateChatAt(activeChat.value, idx, activeChat.value.messages[idx].variables);
     await saveChat(updatedChat);
     chats.value = chats.value.map(c => c.id === updatedChat.id ? updatedChat : c);
     await sendMessage(newContent);
@@ -1326,15 +1338,8 @@ export function useSillytavern() {
     if (!activeChat.value) return;
     const idx = activeChat.value.messages.findIndex(m => m.id === messageId);
     if (idx === -1) return;
-    const truncated = activeChat.value.messages.slice(0, idx);
-    const lastMsg = truncated[truncated.length - 1];
-    const restoredVars = lastMsg?.variables || {};
-    const updatedChat: ChatSession = {
-      ...activeChat.value,
-      messages: truncated,
-      variables: restoredVars,
-      updatedAt: Date.now(),
-    };
+
+    const updatedChat = truncateChatAt(activeChat.value, idx);
     await saveChat(updatedChat);
     chats.value = chats.value.map(c => c.id === updatedChat.id ? updatedChat : c);
   };
@@ -1343,21 +1348,15 @@ export function useSillytavern() {
     if (!activeChat.value || !settings.value) throw new Error('No active chat');
     const idx = activeChat.value.messages.findIndex(m => m.id === messageId);
     if (idx === -1) throw new Error('Message not found');
+
     const branchCount = chats.value.filter(c => c.characterName === settings.value.characterName).length;
     const branchName = name || `${settings.value.characterName} - 分支 ${branchCount + 1}`;
-    const snapshotVars = activeChat.value.messages[idx].variables || {};
-    const newChat: ChatSession = {
-      id: crypto.randomUUID(),
+    const newChat = branchChat(activeChat.value, idx, {
       name: branchName,
-      messages: activeChat.value.messages.slice(0, idx + 1).map(m => ({ ...m })),
-      characterName: settings.value.characterName,
-      userName: settings.value.userName,
       presetId: settings.value.activePresetId || presets.value[0]?.id || null,
       lorebookIds: [...activeLorebookIds.value],
-      variables: snapshotVars,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    };
+      variables: activeChat.value.messages[idx].variables,
+    });
     await saveChat(newChat);
     chats.value = [...chats.value, newChat];
     activeChatId.value = newChat.id;
@@ -1510,6 +1509,7 @@ export function VariablePanel() {
 import { useState } from 'react';
 import { useSillytavern } from '../../hooks/useSillytavern';
 import { VariablePanel } from './VariablePanel';
+import { USER_ROLE } from '../../sillytavern';
 
 export function Chat() {
   const { activeChat, isSending, sendMessage, editMessage, deleteMessagesFrom, branchFromMessage } = useSillytavern();
@@ -1555,7 +1555,7 @@ export function Chat() {
               <>
                 <div className="bubble">{msg.content}</div>
                 <div className="msg-actions">
-                  {msg.role === 'user' && (
+                  {msg.role === USER_ROLE && (
                     <button onClick={() => startEdit(msg)}>编辑并重新生成</button>
                   )}
                   <button onClick={() => deleteMessagesFrom(msg.id)}>删除后续</button>
@@ -1731,7 +1731,7 @@ const save = async () => {
           <template v-else>
             <div class="bubble">{{ msg.content }}</div>
             <div class="msg-actions">
-              <button v-if="msg.role === 'user'" @click="startEdit(msg)">编辑并重新生成</button>
+              <button v-if="msg.role === USER_ROLE" @click="startEdit(msg)">编辑并重新生成</button>
               <button @click="deleteMessagesFrom(msg.id)">删除后续</button>
               <button @click="branchFromMessage(msg.id)">从此分支</button>
             </div>
@@ -1757,6 +1757,7 @@ const save = async () => {
 import { ref } from 'vue';
 import { useSillytavern } from '../../composables/useSillytavern';
 import VariablePanel from './VariablePanel.vue';
+import { USER_ROLE } from '../../sillytavern';
 
 const { activeChat, isSending, sendMessage, editMessage, deleteMessagesFrom, branchFromMessage } = useSillytavern();
 const input = ref('');
@@ -1881,8 +1882,9 @@ const emit = defineEmits<{ close: [] }>();
     renderVariables();
   };
 
-  sillytavernStore.subscribe(renderChats);
+  const unsubscribe = sillytavernStore.subscribe(renderChats);
   renderChats();
+  // Call unsubscribe() before tearing down the page or re-initializing.
 
   document.getElementById('new-chat').onclick = () => sillytavernStore.createChat();
   document.getElementById('chat-modal-btn').onclick = () => {
@@ -1937,7 +1939,7 @@ import {
   getPresets, savePreset, deletePreset,
   getSettings, saveSettings, initializeDatabase,
   getChats, saveChat, deleteChat as deleteChatById,
-  assemblePrompt, extractVariables, mergeVariables,
+  assemblePrompt, extractVariables, mergeVariables, USER_ROLE, truncateChatAt, branchChat,
   type Lorebook, type ChatPreset, type AppSettings, type ChatSession, type ChatMessage,
 } from '../sillytavern';
 
@@ -2015,6 +2017,7 @@ export function createSillytavernStore() {
   };
 
   const loadChat = (id: string) => {
+    if (activeChatId === id) return;
     activeChatId = id;
     notify();
   };
@@ -2110,17 +2113,9 @@ export function createSillytavernStore() {
     if (!activeChat) return;
     const idx = activeChat.messages.findIndex(m => m.id === messageId);
     if (idx === -1) return;
-    const target = activeChat.messages[idx];
-    if (target.role !== 'user') return;
+    if (activeChat.messages[idx].role !== USER_ROLE) return;
 
-    const truncated = activeChat.messages.slice(0, idx);
-    const restoredVars = target.variables || {};
-    const updatedChat: ChatSession = {
-      ...activeChat,
-      messages: truncated,
-      variables: restoredVars,
-      updatedAt: Date.now(),
-    };
+    const updatedChat = truncateChatAt(activeChat, idx, activeChat.messages[idx].variables);
     await saveChat(updatedChat);
     chats = chats.map(c => c.id === updatedChat.id ? updatedChat : c);
     notify();
@@ -2132,15 +2127,8 @@ export function createSillytavernStore() {
     if (!activeChat) return;
     const idx = activeChat.messages.findIndex(m => m.id === messageId);
     if (idx === -1) return;
-    const truncated = activeChat.messages.slice(0, idx);
-    const lastMsg = truncated[truncated.length - 1];
-    const restoredVars = lastMsg?.variables || {};
-    const updatedChat: ChatSession = {
-      ...activeChat,
-      messages: truncated,
-      variables: restoredVars,
-      updatedAt: Date.now(),
-    };
+
+    const updatedChat = truncateChatAt(activeChat, idx);
     await saveChat(updatedChat);
     chats = chats.map(c => c.id === updatedChat.id ? updatedChat : c);
     notify();
@@ -2151,21 +2139,15 @@ export function createSillytavernStore() {
     if (!activeChat || !settings) throw new Error('No active chat');
     const idx = activeChat.messages.findIndex(m => m.id === messageId);
     if (idx === -1) throw new Error('Message not found');
+
     const branchCount = chats.filter(c => c.characterName === settings.characterName).length;
     const branchName = name || `${settings.characterName} - 分支 ${branchCount + 1}`;
-    const snapshotVars = activeChat.messages[idx].variables || {};
-    const newChat: ChatSession = {
-      id: crypto.randomUUID(),
+    const newChat = branchChat(activeChat, idx, {
       name: branchName,
-      messages: activeChat.messages.slice(0, idx + 1).map(m => ({ ...m })),
-      characterName: settings.characterName,
-      userName: settings.userName,
       presetId: settings.activePresetId || presets[0]?.id || null,
       lorebookIds: [...activeLorebookIds],
-      variables: snapshotVars,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    };
+      variables: activeChat.messages[idx].variables,
+    });
     await saveChat(newChat);
     chats = [...chats, newChat];
     activeChatId = newChat.id;
