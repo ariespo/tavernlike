@@ -7,7 +7,7 @@
 - **全自动安装** - 检测框架、安装依赖、生成代码、创建 UI
 - **零配置** - 无需手动设置，一键完成
 - **多框架支持** - React、Vue、原生 JavaScript
-- **完整功能** - 世界书、预设、AI 聊天、多 Session 聊天记录持久化、每轮变量系统
+- **完整功能** - 世界书、预设、AI 聊天、多 Session 聊天记录持久化、每轮变量系统、消息回溯与分支
 - **SillyTavern 兼容** - 支持导入/导出 SillyTavern 格式
 
 ## 核心组件
@@ -27,7 +27,7 @@
 - 支持 Lorebook、Preset、Settings、Chat 等
 
 ### React 集成
-- `useSillytavern.ts` - 组合式 Hook，管理所有状态
+- `useSillytavern.ts` - 组合式 Hook，管理所有状态（支持消息编辑/删除后续/分支）
 
 ## 自动化流程
 
