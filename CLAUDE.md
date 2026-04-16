@@ -7,7 +7,7 @@
 - **全自动安装** - 检测框架、安装依赖、生成代码、创建 UI
 - **零配置** - 无需手动设置，一键完成
 - **多框架支持** - React、Vue、原生 JavaScript
-- **完整功能** - 世界书、预设、AI 聊天、多 Session 聊天记录持久化
+- **完整功能** - 世界书、预设、AI 聊天、多 Session 聊天记录持久化、每轮变量系统
 - **SillyTavern 兼容** - 支持导入/导出 SillyTavern 格式
 
 ## 核心组件
@@ -18,7 +18,8 @@
 
 ### 引擎层
 - `lorebook-engine.ts` - 关键词匹配引擎（AND/OR 逻辑、递归扫描）
-- `prompt-assembler.ts` - 提示词组装器（宏替换、上下文注入）
+- `prompt-assembler.ts` - 提示词组装器（宏替换、上下文注入、变量插值）
+- `variables.ts` - 变量提取与注入（支持 XML `<var />` 标签）
 - `importer.ts` - SillyTavern 格式导入/导出
 
 ### 类型定义

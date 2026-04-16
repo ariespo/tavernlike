@@ -215,6 +215,7 @@ export interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
   timestamp: number;
+  variables?: Record<string, string | number>;
   metadata?: {
     tokenCount?: number;
     lorebookEntries?: string[];
@@ -230,6 +231,7 @@ export interface ChatSession {
   userName: string;
   presetId: string | null;
   lorebookIds: string[];
+  variables?: Record<string, string | number>;
   createdAt: number;
   updatedAt: number;
 }
@@ -561,6 +563,7 @@ export function createLorebookEngine(lorebook: Lorebook): LorebookEngine {
 import type { ChatPreset, Lorebook, ChatMessage, MatchedEntry } from './types';
 import { DEFAULT_PROMPT_BLOCKS } from './types';
 import { createLorebookEngine } from './lorebook-engine';
+import { formatVariablesForPrompt } from './variables';
 
 export interface AssembleOptions {
   userInput: string;
@@ -569,6 +572,7 @@ export interface AssembleOptions {
   lorebooks: Lorebook[];
   userName: string;
   characterName: string;
+  variables?: Record<string, string | number>;
 }
 
 export interface AssembleResult {
@@ -578,7 +582,7 @@ export interface AssembleResult {
 }
 
 export function assemblePrompt(options: AssembleOptions): AssembleResult {
-  const { userInput, history, preset, lorebooks, userName, characterName } = options;
+  const { userInput, history, preset, lorebooks, userName, characterName, variables } = options;
 
   const allMatchedEntries: MatchedEntry[] = [];
   const scanText = userInput + ' ' + history.slice(-3).map(m => m.content).join(' ');
@@ -633,7 +637,7 @@ export function assemblePrompt(options: AssembleOptions): AssembleResult {
     }
 
     let content = block.content;
-    content = replaceMacros(content, { userName, characterName, userInput });
+    content = replaceMacros(content, { userName, characterName, userInput, variables });
 
     if (block.id === DEFAULT_PROMPT_BLOCKS.WORLD_INFO) {
       const worldInfoContent = uniqueEntries.map(e => e.entry.content).join('\n\n');
@@ -656,6 +660,11 @@ export function assemblePrompt(options: AssembleOptions): AssembleResult {
       }
       assembledMessages.push({ role, content });
     }
+  }
+
+  const variablesBlock = formatVariablesForPrompt(variables || {});
+  if (variablesBlock) {
+    systemAccumulator += (systemAccumulator ? '\n\n' : '') + variablesBlock;
   }
 
   if (systemAccumulator) {
@@ -692,19 +701,30 @@ interface MacroContext {
   userName: string;
   characterName: string;
   userInput: string;
+  variables?: Record<string, string | number>;
 }
 
 export function replaceMacros(template: string, context: MacroContext): string {
-  return template
+  let result = template
     .replace(/\{\{user\}\}/g, context.userName)
     .replace(/\{\{char\}\}/g, context.characterName)
     .replace(/\{\{original\}\}/g, context.userInput);
+
+  if (context.variables) {
+    result = result.replace(/\{\{([^{}]+)\}\}/g, (match, key) => {
+      const value = context.variables?.[key.trim()];
+      return value !== undefined ? String(value) : match;
+    });
+  }
+
+  return result;
 }
 
 export const SUPPORTED_MACROS = [
   { name: '{{user}}', description: '用户名' },
   { name: '{{char}}', description: 'AI角色名' },
   { name: '{{original}}', description: '用户原始输入' },
+  { name: '{{变量名}}', description: '自定义变量（例如 {{hp}}）' },
 ] as const;
 ```
 
@@ -831,8 +851,44 @@ export * from './database';
 export * from './lorebook-engine';
 export * from './prompt-assembler';
 export * from './importer';
+export * from './variables';
 
 export const VERSION = '2.0.0';
+```
+
+### 7. variables.ts
+
+```typescript
+/**
+ * Variable System Utilities
+ */
+
+export function extractVariables(text: string): { cleanedText: string; updates: Record<string, string | number> } {
+  const updates: Record<string, string | number> = {};
+  const regex = /<var\s+name="([^"]+)"\s+value="([^"]+)"\s*\/?>/g;
+  let match;
+  while ((match = regex.exec(text)) !== null) {
+    const [, name, rawValue] = match;
+    const num = Number(rawValue);
+    updates[name] = Number.isNaN(num) ? rawValue : num;
+  }
+  const cleanedText = text.replace(regex, '').replace(/\n{2,}/g, '\n').trim();
+  return { cleanedText, updates };
+}
+
+export function mergeVariables(
+  base: Record<string, string | number> = {},
+  updates: Record<string, string | number> = {}
+): Record<string, string | number> {
+  return { ...base, ...updates };
+}
+
+export function formatVariablesForPrompt(variables: Record<string, string | number>): string {
+  const entries = Object.entries(variables);
+  if (entries.length === 0) return '';
+  const lines = entries.map(([k, v]) => `${k}: ${v}`);
+  return `[当前状态]\n${lines.join('\n')}`;
+}
 ```
 
 ---
@@ -848,7 +904,7 @@ import {
   getPresets, savePreset, deletePreset,
   getSettings, saveSettings, initializeDatabase,
   getChats, saveChat, deleteChat as deleteChatById,
-  assemblePrompt,
+  assemblePrompt, extractVariables, mergeVariables,
   type Lorebook, type ChatPreset, type AppSettings, type ChatSession, type ChatMessage,
 } from '../sillytavern';
 
@@ -911,6 +967,7 @@ export function useSillytavern() {
       userName: settings.userName,
       presetId: settings.activePresetId || presets[0]?.id || null,
       lorebookIds: [...activeLorebookIds],
+      variables: {},
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
@@ -930,6 +987,14 @@ export function useSillytavern() {
     if (activeChatId === id) setActiveChatId(null);
   }, [activeChatId]);
 
+  const updateVariables = useCallback(async (updates: Record<string, string | number>) => {
+    if (!activeChat) return;
+    const merged = mergeVariables(activeChat.variables, updates);
+    const updatedChat = { ...activeChat, variables: merged, updatedAt: Date.now() };
+    await saveChat(updatedChat);
+    setChats(prev => prev.map(c => c.id === updatedChat.id ? updatedChat : c));
+  }, [activeChat]);
+
   const sendMessage = useCallback(async (content: string) => {
     if (!settings || !activeChat) {
       throw new Error('No active chat or settings not loaded');
@@ -941,12 +1006,14 @@ export function useSillytavern() {
       if (!activePreset) throw new Error('No preset available');
 
       const activeBooks = lorebooks.filter(b => activeLorebookIds.includes(b.id));
+      const currentVariables = activeChat.variables || {};
 
       const userMessage: ChatMessage = {
         id: crypto.randomUUID(),
         role: 'user',
         content,
         timestamp: Date.now(),
+        variables: { ...currentVariables },
       };
 
       const updatedMessages = [...activeChat.messages, userMessage];
@@ -959,6 +1026,7 @@ export function useSillytavern() {
         lorebooks: activeBooks,
         userName: settings.userName,
         characterName: settings.characterName,
+        variables: currentVariables,
       });
 
       const response = await fetch(settings.api.baseUrl + '/chat/completions', {
@@ -973,16 +1041,19 @@ export function useSillytavern() {
       if (!response.ok) throw new Error(`API error: ${response.status}`);
 
       const data = await response.json();
-      const reply = data.choices?.[0]?.message?.content || '';
+      const rawReply = data.choices?.[0]?.message?.content || '';
+      const { cleanedText: reply, updates: extractedVars } = extractVariables(rawReply);
+      const nextVariables = mergeVariables(currentVariables, extractedVars);
 
       const assistantMessage: ChatMessage = {
         id: crypto.randomUUID(),
         role: 'assistant',
         content: reply,
         timestamp: Date.now(),
+        variables: { ...nextVariables },
       };
 
-      updatedChat = { ...updatedChat, messages: [...updatedChat.messages, assistantMessage] };
+      updatedChat = { ...updatedChat, messages: [...updatedChat.messages, assistantMessage], variables: nextVariables };
       await saveChat(updatedChat);
       setChats(prev => prev.map(c => c.id === updatedChat.id ? updatedChat : c));
     } finally {
@@ -992,7 +1063,7 @@ export function useSillytavern() {
 
   return {
     lorebooks, presets, settings, activeLorebookIds, chats, activeChatId, activeChat, isSending, isLoading,
-    loadAll, toggleLorebook, updateSettings, createChat, loadChat, deleteChat, sendMessage,
+    loadAll, toggleLorebook, updateSettings, createChat, loadChat, deleteChat, sendMessage, updateVariables,
     saveLorebook, deleteLorebook, savePreset, deletePreset,
   };
 }
@@ -1011,7 +1082,7 @@ import {
   getPresets, savePreset, deletePreset,
   getSettings, saveSettings, initializeDatabase,
   getChats, saveChat, deleteChat as deleteChatById,
-  assemblePrompt,
+  assemblePrompt, extractVariables, mergeVariables,
   type Lorebook, type ChatPreset, type AppSettings, type ChatSession, type ChatMessage,
 } from '../sillytavern';
 
@@ -1074,6 +1145,7 @@ export function useSillytavern() {
       userName: settings.value.userName,
       presetId: settings.value.activePresetId || presets.value[0]?.id || null,
       lorebookIds: [...activeLorebookIds.value],
+      variables: {},
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
@@ -1093,6 +1165,14 @@ export function useSillytavern() {
     if (activeChatId.value === id) activeChatId.value = null;
   };
 
+  const updateVariables = async (updates: Record<string, string | number>) => {
+    if (!activeChat.value) return;
+    const merged = mergeVariables(activeChat.value.variables, updates);
+    const updatedChat = { ...activeChat.value, variables: merged, updatedAt: Date.now() };
+    await saveChat(updatedChat);
+    chats.value = chats.value.map(c => c.id === updatedChat.id ? updatedChat : c);
+  };
+
   const sendMessage = async (content: string) => {
     if (!settings.value || !activeChat.value) {
       throw new Error('No active chat or settings not loaded');
@@ -1104,12 +1184,14 @@ export function useSillytavern() {
       if (!activePreset) throw new Error('No preset available');
 
       const activeBooks = lorebooks.value.filter(b => activeLorebookIds.value.includes(b.id));
+      const currentVariables = activeChat.value.variables || {};
 
       const userMessage: ChatMessage = {
         id: crypto.randomUUID(),
         role: 'user',
         content,
         timestamp: Date.now(),
+        variables: { ...currentVariables },
       };
 
       const updatedMessages = [...activeChat.value.messages, userMessage];
@@ -1122,6 +1204,7 @@ export function useSillytavern() {
         lorebooks: activeBooks,
         userName: settings.value.userName,
         characterName: settings.value.characterName,
+        variables: currentVariables,
       });
 
       const response = await fetch(settings.value.api.baseUrl + '/chat/completions', {
@@ -1136,16 +1219,19 @@ export function useSillytavern() {
       if (!response.ok) throw new Error(`API error: ${response.status}`);
 
       const data = await response.json();
-      const reply = data.choices?.[0]?.message?.content || '';
+      const rawReply = data.choices?.[0]?.message?.content || '';
+      const { cleanedText: reply, updates: extractedVars } = extractVariables(rawReply);
+      const nextVariables = mergeVariables(currentVariables, extractedVars);
 
       const assistantMessage: ChatMessage = {
         id: crypto.randomUUID(),
         role: 'assistant',
         content: reply,
         timestamp: Date.now(),
+        variables: { ...nextVariables },
       };
 
-      updatedChat = { ...updatedChat, messages: [...updatedChat.messages, assistantMessage] };
+      updatedChat = { ...updatedChat, messages: [...updatedChat.messages, assistantMessage], variables: nextVariables };
       await saveChat(updatedChat);
       chats.value = chats.value.map(c => c.id === updatedChat.id ? updatedChat : c);
     } finally {
@@ -1170,6 +1256,7 @@ export function useSillytavern() {
     loadChat,
     deleteChat,
     sendMessage,
+    updateVariables,
     saveLorebook,
     deleteLorebook,
     savePreset,
@@ -1206,11 +1293,95 @@ const showChatModal = ref(false);
 
 ## UI Components
 
+### React — VariablePanel.tsx
+
+```tsx
+import { useState } from 'react';
+import { useSillytavern } from '../../hooks/useSillytavern';
+
+export function VariablePanel() {
+  const { activeChat, updateVariables } = useSillytavern();
+  const [isOpen, setIsOpen] = useState(false);
+  const [draft, setDraft] = useState<Record<string, string>({});
+
+  if (!activeChat) return null;
+  const vars = activeChat.variables || {};
+
+  const startEdit = () => {
+    setDraft(Object.fromEntries(Object.entries(vars).map(([k, v]) => [k, String(v)])));
+    setIsOpen(true);
+  };
+
+  const save = async () => {
+    const updates: Record<string, string | number> = {};
+    for (const [k, v] of Object.entries(draft)) {
+      if (k.trim()) {
+        const num = Number(v);
+        updates[k.trim()] = Number.isNaN(num) ? v : num;
+      }
+    }
+    await updateVariables(updates);
+    setIsOpen(false);
+  };
+
+  return (
+    <div className="variable-panel">
+      <button onClick={() => (isOpen ? setIsOpen(false) : startEdit())}>
+        {isOpen ? '取消' : '变量'}
+      </button>
+      {isOpen && (
+        <div className="variable-editor">
+          {Object.entries(draft).map(([key, value], idx) => (
+            <div key={idx} className="variable-row">
+              <input
+                value={key}
+                onChange={(e) => {
+                  const next = { ...draft };
+                  const old = Object.keys(draft)[idx];
+                  delete next[old];
+                  next[e.target.value] = value;
+                  setDraft(next);
+                }}
+                placeholder="名称"
+              />
+              <input
+                value={value}
+                onChange={(e) => setDraft({ ...draft, [key]: e.target.value })}
+                placeholder="值"
+              />
+              <button
+                onClick={() => {
+                  const next = { ...draft };
+                  delete next[key];
+                  setDraft(next);
+                }}
+              >
+                删除
+              </button>
+            </div>
+          ))}
+          <button onClick={() => setDraft({ ...draft, '': '' })}>+ 添加</button>
+          <button onClick={save}>保存</button>
+        </div>
+      )}
+      {!isOpen && Object.keys(vars).length > 0 && (
+        <ul className="variable-list">
+          {Object.entries(vars).map(([k, v]) => (
+            <li key={k}>{k}: {v}</li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+```
+
 ### React — Chat.tsx
 
 ```tsx
 import { useState } from 'react';
 import { useSillytavern } from '../../hooks/useSillytavern';
+import { VariablePanel } from './VariablePanel';
 
 export function Chat() {
   const { activeChat, isSending, sendMessage } = useSillytavern();
@@ -1228,6 +1399,7 @@ export function Chat() {
 
   return (
     <div className="chat">
+      <VariablePanel />
       <div className="messages">
         {activeChat.messages.map((msg) => (
           <div key={msg.id} className={`message ${msg.role}`}>
@@ -1299,6 +1471,83 @@ export function ChatModal({ onClose }: ChatModalProps) {
 }
 ```
 
+### Vue — VariablePanel.vue
+
+```vue
+<template>
+  <div v-if="activeChat" class="variable-panel">
+    <button @click="isOpen ? (isOpen = false) : startEdit()">
+      {{ isOpen ? '取消' : '变量' }}
+    </button>
+    <div v-if="isOpen" class="variable-editor">
+      <div v-for="(value, key) in draft" :key="key" class="variable-row">
+        <input v-model="draftKeys[key]" @blur="syncKey(key, $event)" placeholder="名称" />
+        <input v-model="draft[key]" placeholder="值" />
+        <button @click="removeKey(key)">删除</button>
+      </div>
+      <button @click="addEmpty">+ 添加</button>
+      <button @click="save">保存</button>
+    </div>
+    <ul v-else-if="Object.keys(vars).length > 0" class="variable-list">
+      <li v-for="[k, v] in Object.entries(vars)" :key="k">{{ k }}: {{ v }}</li>
+    </ul>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { ref, computed } from 'vue';
+import { useSillytavern } from '../../composables/useSillytavern';
+
+const { activeChat, updateVariables } = useSillytavern();
+const isOpen = ref(false);
+const draft = ref<Record<string, string>>({});
+const draftKeys = ref<Record<string, string>>({});
+
+const vars = computed(() => activeChat.value?.variables || {});
+
+const startEdit = () => {
+  draft.value = Object.fromEntries(Object.entries(vars.value).map(([k, v]) => [k, String(v)]));
+  draftKeys.value = { ...draft.value };
+  isOpen.value = true;
+};
+
+const addEmpty = () => {
+  draft.value[''] = '';
+  draftKeys.value[''] = '';
+};
+
+const removeKey = (key: string) => {
+  const next = { ...draft.value };
+  delete next[key];
+  draft.value = next;
+  const nextKeys = { ...draftKeys.value };
+  delete nextKeys[key];
+  draftKeys.value = nextKeys;
+};
+
+const syncKey = (oldKey: string, e: Event) => {
+  const newKey = (e.target as HTMLInputElement).value;
+  if (newKey === oldKey) return;
+  const next = { ...draft.value };
+  next[newKey] = next[oldKey];
+  delete next[oldKey];
+  draft.value = next;
+};
+
+const save = async () => {
+  const updates: Record<string, string | number> = {};
+  for (const [k, v] of Object.entries(draft.value)) {
+    if (k.trim()) {
+      const num = Number(v);
+      updates[k.trim()] = Number.isNaN(num) ? v : num;
+    }
+  }
+  await updateVariables(updates);
+  isOpen.value = false;
+};
+</script>
+```
+
 ### Vue — Chat.vue
 
 ```vue
@@ -1308,6 +1557,7 @@ export function ChatModal({ onClose }: ChatModalProps) {
       选择一个聊天或创建新对话
     </div>
     <template v-else>
+      <VariablePanel />
       <div class="messages">
         <div
           v-for="msg in activeChat.messages"
@@ -1335,6 +1585,7 @@ export function ChatModal({ onClose }: ChatModalProps) {
 <script setup lang="ts">
 import { ref } from 'vue';
 import { useSillytavern } from '../../composables/useSillytavern';
+import VariablePanel from './VariablePanel.vue';
 
 const { activeChat, isSending, sendMessage } = useSillytavern();
 const input = ref('');
@@ -1393,6 +1644,7 @@ const emit = defineEmits<{ close: [] }>();
     <ul id="chat-list"></ul>
   </div>
   <div id="chat-view">
+    <div id="variables" style="margin-bottom:8px;"></div>
     <div id="messages"></div>
     <input id="msg-input" placeholder="输入消息..." />
     <button id="send-btn">发送</button>
@@ -1403,6 +1655,18 @@ const emit = defineEmits<{ close: [] }>();
   import { sillytavernStore } from './sillytavern';
 
   await sillytavernStore.loadAll();
+
+  const renderVariables = () => {
+    const el = document.getElementById('variables');
+    const { activeChat } = sillytavernStore;
+    if (!activeChat) { el.innerHTML = ''; return; }
+    const vars = activeChat.variables || {};
+    const entries = Object.entries(vars);
+    if (entries.length === 0) { el.innerHTML = '<em>暂无变量</em>'; return; }
+    el.innerHTML = entries.map(([k, v]) => `
+      <span class="var-badge">${k}: ${v}</span>
+    `).join(' ');
+  };
 
   const renderChats = () => {
     const list = document.getElementById('chat-list');
@@ -1417,6 +1681,8 @@ const emit = defineEmits<{ close: [] }>();
     msgs.innerHTML = activeChat
       ? activeChat.messages.map(m => `<div class="${m.role}">${m.content}</div>`).join('')
       : '<div>选择一个聊天或创建新对话</div>';
+
+    renderVariables();
   };
 
   sillytavernStore.subscribe(renderChats);
@@ -1458,7 +1724,7 @@ import {
   getPresets, savePreset, deletePreset,
   getSettings, saveSettings, initializeDatabase,
   getChats, saveChat, deleteChat as deleteChatById,
-  assemblePrompt,
+  assemblePrompt, extractVariables, mergeVariables,
   type Lorebook, type ChatPreset, type AppSettings, type ChatSession, type ChatMessage,
 } from '../sillytavern';
 
@@ -1524,6 +1790,7 @@ export function createSillytavernStore() {
       userName: settings.userName,
       presetId: settings.activePresetId || presets[0]?.id || null,
       lorebookIds: [...activeLorebookIds],
+      variables: {},
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
@@ -1546,6 +1813,16 @@ export function createSillytavernStore() {
     notify();
   };
 
+  const updateVariables = async (updates: Record<string, string | number>) => {
+    const activeChat = chats.find(c => c.id === activeChatId);
+    if (!activeChat) return;
+    const merged = mergeVariables(activeChat.variables, updates);
+    const updatedChat = { ...activeChat, variables: merged, updatedAt: Date.now() };
+    await saveChat(updatedChat);
+    chats = chats.map(c => c.id === updatedChat.id ? updatedChat : c);
+    notify();
+  };
+
   const sendMessage = async (content: string) => {
     if (!settings || !activeChatId) throw new Error('No active chat or settings not loaded');
     const activeChat = chats.find(c => c.id === activeChatId);
@@ -1559,12 +1836,14 @@ export function createSillytavernStore() {
       if (!activePreset) throw new Error('No preset available');
 
       const activeBooks = lorebooks.filter(b => activeLorebookIds.includes(b.id));
+      const currentVariables = activeChat.variables || {};
 
       const userMessage: ChatMessage = {
         id: crypto.randomUUID(),
         role: 'user',
         content,
         timestamp: Date.now(),
+        variables: { ...currentVariables },
       };
 
       const updatedMessages = [...activeChat.messages, userMessage];
@@ -1577,6 +1856,7 @@ export function createSillytavernStore() {
         lorebooks: activeBooks,
         userName: settings.userName,
         characterName: settings.characterName,
+        variables: currentVariables,
       });
 
       const response = await fetch(settings.api.baseUrl + '/chat/completions', {
@@ -1591,16 +1871,19 @@ export function createSillytavernStore() {
       if (!response.ok) throw new Error(`API error: ${response.status}`);
 
       const data = await response.json();
-      const reply = data.choices?.[0]?.message?.content || '';
+      const rawReply = data.choices?.[0]?.message?.content || '';
+      const { cleanedText: reply, updates: extractedVars } = extractVariables(rawReply);
+      const nextVariables = mergeVariables(currentVariables, extractedVars);
 
       const assistantMessage: ChatMessage = {
         id: crypto.randomUUID(),
         role: 'assistant',
         content: reply,
         timestamp: Date.now(),
+        variables: { ...nextVariables },
       };
 
-      updatedChat = { ...updatedChat, messages: [...updatedChat.messages, assistantMessage] };
+      updatedChat = { ...updatedChat, messages: [...updatedChat.messages, assistantMessage], variables: nextVariables };
       await saveChat(updatedChat);
       chats = chats.map(c => c.id === updatedChat.id ? updatedChat : c);
     } finally {
@@ -1631,6 +1914,7 @@ export function createSillytavernStore() {
     loadChat,
     deleteChat,
     sendMessage,
+    updateVariables,
     saveLorebook,
     deleteLorebook,
     savePreset,
@@ -1672,11 +1956,11 @@ When user runs `/sillytavern-web`:
    - Framework integration file (React: `src/hooks/useSillytavern.ts`, Vue: `src/composables/useSillytavern.ts`, Vanilla: `src/vanilla/sillytavern-store.ts`)
 
 5. **Create UI Components** (Auto - generate based on framework)
-   - React: `SettingsModal.tsx`, `LorebookModal.tsx`, `PresetModal.tsx`, `ChatModal.tsx`, `Chat.tsx`
-   - Vue: `SettingsModal.vue`, `LorebookModal.vue`, `PresetModal.vue`, `ChatModal.vue`, `Chat.vue`
-   - Vanilla: inline example for settings/lorebook/preset/chat UI
+   - React: `SettingsModal.tsx`, `LorebookModal.tsx`, `PresetModal.tsx`, `ChatModal.tsx`, `Chat.tsx`, `VariablePanel.tsx`
+   - Vue: `SettingsModal.vue`, `LorebookModal.vue`, `PresetModal.vue`, `ChatModal.vue`, `Chat.vue`, `VariablePanel.vue`
+   - Vanilla: inline example for settings/lorebook/preset/chat/variable UI
 
-6. **Show Integration Example** (Auto - display usage code for detected framework, including multi-session chat)
+6. **Show Integration Example** (Auto - display usage code for detected framework, including multi-session chat and variable editing)
 
 ---
 
@@ -1692,6 +1976,8 @@ After installation, verify:
 - [ ] Can import SillyTavern JSON
 - [ ] Can create/load/delete chat sessions
 - [ ] Messages persist in IndexedDB across reloads
+- [ ] Variables are injected into system prompt and can be edited manually
+- [ ] `<var name="..." value="..." />` tags in LLM replies auto-update variables
 
 ---
 
@@ -1705,4 +1991,5 @@ After installation, verify:
 - SillyTavern format import/export
 - Framework-specific state management (React hooks / Vue composables / Vanilla store)
 - Multi-session chat with full IndexedDB persistence
-- Ready-to-use UI components (including Chat and Chat Session manager)
+- Per-turn variable system with XML extraction and manual editing UI
+- Ready-to-use UI components (including Chat, Chat Session manager, and Variable Panel)

@@ -10,9 +10,9 @@
 
 1. ✅ 检测你的项目类型（React/Vue/JS）
 2. ✅ 安装依赖（`npm install dexie`）
-3. ✅ 创建核心文件（6个 TypeScript 模块）
+3. ✅ 创建核心文件（7个 TypeScript 模块）
 4. ✅ 创建 React Hooks（`useSillytavern`）
-5. ✅ 创建 UI 组件（设置/世界书/预设/聊天管理器）
+5. ✅ 创建 UI 组件（设置/世界书/预设/聊天/变量管理器）
 6. ✅ 显示使用示例
 
 **全程无需手动操作。**
@@ -64,6 +64,14 @@ npm init -y
 
 所有聊天记录自动保存在浏览器（IndexedDB），刷新不丢失。
 
+### 5. 编辑游戏变量
+
+点击聊天界面上的 **"变量"** 按钮：
+
+- **手动编辑** - 像填表一样添加/修改/删除变量（例如 `hp: 80`、`mood: 愤怒`）
+- **自动提取** - 如果 AI 回复中包含 `<var name="hp" value="80" />`，系统会自动解析并更新变量
+- **提示词注入** - 当前变量会自动附加在系统提示词里，AI 在后续轮次中可以看到
+
 ---
 
 ## 立即使用
@@ -113,6 +121,7 @@ export default function App() {
       lorebooks: activeBooks,
       userName: settings?.userName || '用户',
       characterName: settings?.characterName || 'AI',
+      variables: { hp: 100, mood: '平静' }, // 自定义变量会自动注入系统提示词
     });
 
     const response = await fetch(settings.api.baseUrl + '/chat/completions', {

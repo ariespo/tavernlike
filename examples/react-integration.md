@@ -63,6 +63,7 @@ export const useSillytavernStore = create((set, get) => ({
 // components/Chat.tsx
 import { useState } from 'react';
 import { useSillytavern } from '../hooks/useSillytavern';
+import { VariablePanel } from './VariablePanel';
 
 export function Chat() {
   const { activeChat, isSending, sendMessage } = useSillytavern();
@@ -80,6 +81,7 @@ export function Chat() {
 
   return (
     <div className="chat">
+      <VariablePanel />
       <div className="messages">
         {activeChat.messages.map((msg) => (
           <div key={msg.id} className={`message ${msg.role}`}>
