@@ -1240,13 +1240,24 @@ export function useSillytavern() {
         variables: currentVariables,
       });
 
+      const requestBody: Record<string, any> = {
+        model: activePreset.settings.openai_model || settings.api.model,
+        messages: promptMessages,
+      };
+      if (activePreset.settings.temp_openai !== undefined) requestBody.temperature = activePreset.settings.temp_openai;
+      if (activePreset.settings.openai_max_tokens !== undefined) requestBody.max_tokens = activePreset.settings.openai_max_tokens;
+      if (activePreset.settings.top_p_openai !== undefined) requestBody.top_p = activePreset.settings.top_p_openai;
+      if (activePreset.settings.freq_pen_openai !== undefined) requestBody.frequency_penalty = activePreset.settings.freq_pen_openai;
+      if (activePreset.settings.pres_pen_openai !== undefined) requestBody.presence_penalty = activePreset.settings.pres_pen_openai;
+      if (activePreset.settings.stream_openai !== undefined) requestBody.stream = activePreset.settings.stream_openai;
+
       const response = await fetch(settings.api.baseUrl + '/chat/completions', {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${settings.api.apiKey}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ model: settings.api.model, messages: promptMessages }),
+        body: JSON.stringify(requestBody),
       });
 
       if (!response.ok) throw new Error(`API error: ${response.status}`);
@@ -1462,13 +1473,24 @@ export function useSillytavern() {
         variables: currentVariables,
       });
 
+      const requestBody: Record<string, any> = {
+        model: activePreset.settings.openai_model || settings.value.api.model,
+        messages: promptMessages,
+      };
+      if (activePreset.settings.temp_openai !== undefined) requestBody.temperature = activePreset.settings.temp_openai;
+      if (activePreset.settings.openai_max_tokens !== undefined) requestBody.max_tokens = activePreset.settings.openai_max_tokens;
+      if (activePreset.settings.top_p_openai !== undefined) requestBody.top_p = activePreset.settings.top_p_openai;
+      if (activePreset.settings.freq_pen_openai !== undefined) requestBody.frequency_penalty = activePreset.settings.freq_pen_openai;
+      if (activePreset.settings.pres_pen_openai !== undefined) requestBody.presence_penalty = activePreset.settings.pres_pen_openai;
+      if (activePreset.settings.stream_openai !== undefined) requestBody.stream = activePreset.settings.stream_openai;
+
       const response = await fetch(settings.value.api.baseUrl + '/chat/completions', {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${settings.value.api.apiKey}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ model: settings.value.api.model, messages: promptMessages }),
+        body: JSON.stringify(requestBody),
       });
 
       if (!response.ok) throw new Error(`API error: ${response.status}`);
@@ -1929,6 +1951,223 @@ export function PresetModal({ onClose }: PresetModalProps) {
 }
 ```
 
+### React — LorebookModal.tsx
+
+```tsx
+import { useState } from 'react';
+import { useSillytavern } from '../../hooks/useSillytavern';
+import { importJsonFile, importLorebook, exportLorebook, exportToJson } from '../../sillytavern/importer';
+import type { Lorebook, LorebookEntry } from '../../sillytavern';
+
+interface LorebookModalProps {
+  onClose: () => void;
+}
+
+export function LorebookModal({ onClose }: LorebookModalProps) {
+  const { lorebooks, activeLorebookIds, toggleLorebook, saveLorebook, deleteLorebook } = useSillytavern();
+  const [selected, setSelected] = useState<Lorebook | null>(null);
+  const [draft, setDraft] = useState<Lorebook | null>(null);
+
+  const handleImport = async () => {
+    const data = await importJsonFile<any>();
+    if (!data) return;
+    try {
+      const imported = importLorebook(data);
+      const newLorebook: Lorebook = {
+        ...imported,
+        id: crypto.randomUUID(),
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+      await saveLorebook(newLorebook);
+    } catch (e) {
+      alert('导入失败: ' + (e as Error).message);
+    }
+  };
+
+  const handleExport = (book: Lorebook) => {
+    exportToJson(exportLorebook(book), `${book.name}.json`);
+  };
+
+  const startEdit = (book: Lorebook) => {
+    setSelected(book);
+    setDraft({ ...book, entries: book.entries.map(e => ({ ...e })) });
+  };
+
+  const updateEntry = (index: number, updates: Partial<LorebookEntry>) => {
+    if (!draft) return;
+    const next = [...draft.entries];
+    next[index] = { ...next[index], ...updates };
+    setDraft({ ...draft, entries: next });
+  };
+
+  const addEntry = () => {
+    if (!draft) return;
+    const newEntry: LorebookEntry = {
+      id: crypto.randomUUID(),
+      keys: [],
+      secondaryKeys: [],
+      content: '',
+      order: 100,
+      position: 'before_char',
+      selective: false,
+      selectiveLogic: 'and_any',
+      constant: false,
+      probability: 100,
+      addMemo: false,
+    };
+    setDraft({ ...draft, entries: [...draft.entries, newEntry] });
+  };
+
+  const removeEntry = (index: number) => {
+    if (!draft) return;
+    const next = [...draft.entries];
+    next.splice(index, 1);
+    setDraft({ ...draft, entries: next });
+  };
+
+  const saveEdit = async () => {
+    if (!draft) return;
+    await saveLorebook({ ...draft, updatedAt: Date.now() });
+    setDraft(null);
+    setSelected(null);
+  };
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <header>
+          <h3>创意工坊（世界书）</h3>
+          <button onClick={onClose}>关闭</button>
+        </header>
+        {!draft ? (
+          <div className="lorebook-manager">
+            <aside>
+              <button onClick={handleImport}>导入 SillyTavern 世界书</button>
+              <button onClick={() => startEdit({
+                id: crypto.randomUUID(),
+                name: '新世界书',
+                entries: [],
+                recursiveScanning: false,
+                caseSensitive: false,
+                matchWholeWords: false,
+                createdAt: Date.now(),
+                updatedAt: Date.now(),
+              } as Lorebook)}>新建</button>
+              <ul>
+                {lorebooks.map(book => (
+                  <li key={book.id}>
+                    <input
+                      type="checkbox"
+                      checked={activeLorebookIds.includes(book.id)}
+                      onChange={() => toggleLorebook(book.id)}
+                    />
+                    <span onClick={() => startEdit(book)}>{book.name}</span>
+                    <button onClick={() => handleExport(book)}>导出</button>
+                    <button onClick={() => deleteLorebook(book.id)}>删除</button>
+                  </li>
+                ))}
+              </ul>
+            </aside>
+            <main>
+              {selected ? (
+                <div>选择左侧世界书进行编辑</div>
+              ) : (
+                <div>选择一个世界书或创建新的</div>
+              )}
+            </main>
+          </div>
+        ) : (
+          <div className="lorebook-editor">
+            <input
+              value={draft.name}
+              onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+              placeholder="世界书名称"
+            />
+            <div className="entries">
+              {draft.entries.map((entry, idx) => (
+                <div key={entry.id} className="entry-row">
+                  <input
+                    value={entry.keys.join(', ')}
+                    onChange={(e) => updateEntry(idx, { keys: e.target.value.split(',').map(s => s.trim()) })}
+                    placeholder="关键词（逗号分隔）"
+                  />
+                  <input
+                    value={entry.secondaryKeys.join(', ')}
+                    onChange={(e) => updateEntry(idx, { secondaryKeys: e.target.value.split(',').map(s => s.trim()) })}
+                    placeholder="次级关键词（逗号分隔）"
+                  />
+                  <textarea
+                    value={entry.content}
+                    onChange={(e) => updateEntry(idx, { content: e.target.value })}
+                    placeholder="内容"
+                    rows={3}
+                  />
+                  <button onClick={() => removeEntry(idx)}>删除条目</button>
+                </div>
+              ))}
+              <button onClick={addEntry}>+ 添加条目</button>
+            </div>
+            <button onClick={saveEdit}>保存</button>
+            <button onClick={() => { setDraft(null); setSelected(null); }}>取消</button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+```
+
+### React — SettingsModal.tsx
+
+```tsx
+import { useState } from 'react';
+import { useSillytavern } from '../../hooks/useSillytavern';
+
+interface SettingsModalProps {
+  onClose: () => void;
+}
+
+export function SettingsModal({ onClose }: SettingsModalProps) {
+  const { settings, updateSettings } = useSillytavern();
+  const [draft, setDraft] = useState({
+    baseUrl: settings?.api.baseUrl || '',
+    apiKey: settings?.api.apiKey || '',
+    model: settings?.api.model || '',
+    userName: settings?.userName || '',
+    characterName: settings?.characterName || '',
+  });
+
+  const save = async () => {
+    await updateSettings({
+      api: { ...settings!.api, baseUrl: draft.baseUrl, apiKey: draft.apiKey, model: draft.model },
+      userName: draft.userName,
+      characterName: draft.characterName,
+    });
+    onClose();
+  };
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <header>
+          <h3>设置</h3>
+          <button onClick={onClose}>关闭</button>
+        </header>
+        <div className="settings-form">
+          <label>API 地址<input value={draft.baseUrl} onChange={(e) => setDraft({ ...draft, baseUrl: e.target.value })} /></label>
+          <label>API Key<input type="password" value={draft.apiKey} onChange={(e) => setDraft({ ...draft, apiKey: e.target.value })} /></label>
+          <label>模型<input value={draft.model} onChange={(e) => setDraft({ ...draft, model: e.target.value })} placeholder="gpt-3.5-turbo" /></label>
+          <label>用户名称<input value={draft.userName} onChange={(e) => setDraft({ ...draft, userName: e.target.value })} /></label>
+          <label>角色名称<input value={draft.characterName} onChange={(e) => setDraft({ ...draft, characterName: e.target.value })} /></label>
+          <button onClick={save}>保存</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+```
+
 ### Vue — VariablePanel.vue
 
 ```vue
@@ -2205,6 +2444,211 @@ const saveEdit = async () => {
   if (!editing.value) return;
   await savePreset({ ...editing.value, updatedAt: Date.now() });
   editing.value = null;
+};
+</script>
+```
+
+### Vue — LorebookModal.vue
+
+```vue
+<template>
+  <div class="modal-overlay" @click="emit('close')">
+    <div class="modal" @click.stop>
+      <header>
+        <h3>创意工坊（世界书）</h3>
+        <button @click="emit('close')">关闭</button>
+      </header>
+      <div v-if="!draft" class="lorebook-manager">
+        <aside>
+          <button @click="handleImport">导入 SillyTavern 世界书</button>
+          <button @click="startNew">新建</button>
+          <ul>
+            <li v-for="book in lorebooks" :key="book.id">
+              <input
+                type="checkbox"
+                :checked="activeLorebookIds.includes(book.id)"
+                @change="toggleLorebook(book.id)"
+              />
+              <span @click="startEdit(book)">{{ book.name }}</span>
+              <button @click.stop="handleExport(book)">导出</button>
+              <button @click.stop="deleteLorebook(book.id)">删除</button>
+            </li>
+          </ul>
+        </aside>
+        <main>
+          <div>选择一个世界书或创建新的</div>
+        </main>
+      </div>
+      <div v-else class="lorebook-editor">
+        <input v-model="draft.name" placeholder="世界书名称" />
+        <div class="entries">
+          <div v-for="(entry, idx) in draft.entries" :key="entry.id" class="entry-row">
+            <input
+              :value="entry.keys.join(', ')"
+              @input="updateEntry(idx, 'keys', ($event.target as HTMLInputElement).value)"
+              placeholder="关键词（逗号分隔）"
+            />
+            <input
+              :value="entry.secondaryKeys.join(', ')"
+              @input="updateEntry(idx, 'secondaryKeys', ($event.target as HTMLInputElement).value)"
+              placeholder="次级关键词（逗号分隔）"
+            />
+            <textarea
+              v-model="entry.content"
+              placeholder="内容"
+              rows="3"
+            />
+            <button @click="removeEntry(idx)">删除条目</button>
+          </div>
+          <button @click="addEntry">+ 添加条目</button>
+        </div>
+        <button @click="saveEdit">保存</button>
+        <button @click="cancel">取消</button>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { ref } from 'vue';
+import { useSillytavern } from '../../composables/useSillytavern';
+import { importJsonFile, importLorebook, exportLorebook, exportToJson } from '../../sillytavern/importer';
+import type { Lorebook, LorebookEntry } from '../../sillytavern';
+
+const { lorebooks, activeLorebookIds, toggleLorebook, saveLorebook, deleteLorebook } = useSillytavern();
+const emit = defineEmits<{ close: [] }>();
+const draft = ref<Lorebook | null>(null);
+
+const handleImport = async () => {
+  const data = await importJsonFile<any>();
+  if (!data) return;
+  try {
+    const imported = importLorebook(data);
+    const newLorebook: Lorebook = {
+      ...imported,
+      id: crypto.randomUUID(),
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    await saveLorebook(newLorebook);
+  } catch (e) {
+    alert('导入失败: ' + (e as Error).message);
+  }
+};
+
+const handleExport = (book: Lorebook) => {
+  exportToJson(exportLorebook(book), `${book.name}.json`);
+};
+
+const startNew = () => {
+  draft.value = {
+    id: crypto.randomUUID(),
+    name: '新世界书',
+    entries: [],
+    recursiveScanning: false,
+    caseSensitive: false,
+    matchWholeWords: false,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  } as Lorebook;
+};
+
+const startEdit = (book: Lorebook) => {
+  draft.value = { ...book, entries: book.entries.map(e => ({ ...e })) };
+};
+
+const updateEntry = (index: number, field: keyof LorebookEntry, value: string) => {
+  if (!draft.value) return;
+  const next = [...draft.value.entries];
+  if (field === 'keys' || field === 'secondaryKeys') {
+    next[index] = { ...next[index], [field]: value.split(',').map(s => s.trim()) };
+  } else {
+    next[index] = { ...next[index], [field]: value };
+  }
+  draft.value = { ...draft.value, entries: next };
+};
+
+const addEntry = () => {
+  if (!draft.value) return;
+  const newEntry: LorebookEntry = {
+    id: crypto.randomUUID(),
+    keys: [],
+    secondaryKeys: [],
+    content: '',
+    order: 100,
+    position: 'before_char',
+    selective: false,
+    selectiveLogic: 'and_any',
+    constant: false,
+    probability: 100,
+    addMemo: false,
+  };
+  draft.value = { ...draft.value, entries: [...draft.value.entries, newEntry] };
+};
+
+const removeEntry = (index: number) => {
+  if (!draft.value) return;
+  const next = [...draft.value.entries];
+  next.splice(index, 1);
+  draft.value = { ...draft.value, entries: next };
+};
+
+const saveEdit = async () => {
+  if (!draft.value) return;
+  await saveLorebook({ ...draft.value, updatedAt: Date.now() });
+  draft.value = null;
+};
+
+const cancel = () => {
+  draft.value = null;
+};
+</script>
+```
+
+### Vue — SettingsModal.vue
+
+```vue
+<template>
+  <div class="modal-overlay" @click="emit('close')">
+    <div class="modal" @click.stop>
+      <header>
+        <h3>设置</h3>
+        <button @click="emit('close')">关闭</button>
+      </header>
+      <div class="settings-form">
+        <label>API 地址 <input v-model="draft.baseUrl" /></label>
+        <label>API Key <input type="password" v-model="draft.apiKey" /></label>
+        <label>模型 <input v-model="draft.model" placeholder="gpt-3.5-turbo" /></label>
+        <label>用户名称 <input v-model="draft.userName" /></label>
+        <label>角色名称 <input v-model="draft.characterName" /></label>
+        <button @click="save">保存</button>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { ref } from 'vue';
+import { useSillytavern } from '../../composables/useSillytavern';
+
+const { settings, updateSettings } = useSillytavern();
+const emit = defineEmits<{ close: [] }>();
+
+const draft = ref({
+  baseUrl: settings.value?.api.baseUrl || '',
+  apiKey: settings.value?.api.apiKey || '',
+  model: settings.value?.api.model || '',
+  userName: settings.value?.userName || '',
+  characterName: settings.value?.characterName || '',
+});
+
+const save = async () => {
+  await updateSettings({
+    api: { ...settings.value!.api, baseUrl: draft.value.baseUrl, apiKey: draft.value.apiKey, model: draft.value.model },
+    userName: draft.value.userName,
+    characterName: draft.value.characterName,
+  });
+  emit('close');
 };
 </script>
 ```
@@ -2521,13 +2965,24 @@ export function createSillytavernStore() {
         variables: currentVariables,
       });
 
+      const requestBody: Record<string, any> = {
+        model: activePreset.settings.openai_model || settings.api.model,
+        messages: promptMessages,
+      };
+      if (activePreset.settings.temp_openai !== undefined) requestBody.temperature = activePreset.settings.temp_openai;
+      if (activePreset.settings.openai_max_tokens !== undefined) requestBody.max_tokens = activePreset.settings.openai_max_tokens;
+      if (activePreset.settings.top_p_openai !== undefined) requestBody.top_p = activePreset.settings.top_p_openai;
+      if (activePreset.settings.freq_pen_openai !== undefined) requestBody.frequency_penalty = activePreset.settings.freq_pen_openai;
+      if (activePreset.settings.pres_pen_openai !== undefined) requestBody.presence_penalty = activePreset.settings.pres_pen_openai;
+      if (activePreset.settings.stream_openai !== undefined) requestBody.stream = activePreset.settings.stream_openai;
+
       const response = await fetch(settings.api.baseUrl + '/chat/completions', {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${settings.api.apiKey}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ model: settings.api.model, messages: promptMessages }),
+        body: JSON.stringify(requestBody),
       });
 
       if (!response.ok) throw new Error(`API error: ${response.status}`);
