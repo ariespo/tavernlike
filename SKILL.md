@@ -76,15 +76,42 @@ export interface LorebookEntry {
   keys: string[];
   secondaryKeys: string[];
   content: string;
+  comment?: string;
   order: number;
-  position: 'before_char' | 'after_char' | 'before_example' | 'after_example' | 'at_depth';
+  /** SillyTavern position: 0=before_char, 1=after_char, 2=before_example(AN top), 3=after_example(AN bottom), 4=at_depth, 5=example_msg_top, 6=example_msg_bottom, 7=outlet */
+  position: 'before_char' | 'after_char' | 'before_example' | 'after_example' | 'at_depth' | 'example_msg_top' | 'example_msg_bottom' | 'outlet';
   depth?: number;
+  role?: number;
   selective: boolean;
-  selectiveLogic: 'and' | 'or';
+  /** 0=and_any(not_any?), 1=or(not_all?), actual SillyTavern has 4 logics but we normalize to and/or where possible */
+  selectiveLogic: 'and_any' | 'not_all' | 'not_any' | 'and_all';
   constant: boolean;
   probability: number;
+  useProbability?: boolean;
   addMemo: boolean;
-  comment?: string;
+  sticky?: number;
+  cooldown?: number;
+  delay?: number;
+  weight?: number;
+  scanDepth?: number;
+  caseSensitive?: boolean;
+  matchWholeWords?: boolean;
+  excludeRecursion?: boolean;
+  preventRecursion?: boolean;
+  useGroupScoring?: boolean;
+  matchPersonaDescription?: boolean;
+  matchCharacterDescription?: boolean;
+  matchCharacterPersonality?: boolean;
+  matchCharacterDepthPrompt?: boolean;
+  matchScenario?: boolean;
+  matchCreatorNotes?: boolean;
+  group?: string;
+  decorators?: string[];
+  characterFilter?: {
+    isExclude?: boolean;
+    names?: string[];
+    tags?: number[];
+  };
 }
 
 export interface Lorebook {
@@ -102,7 +129,7 @@ export interface Lorebook {
 export interface SillyTavernLorebookExport {
   name: string;
   description?: string;
-  entries: Array<{
+  entries: Record<string, {
     uid: number;
     key: string[];
     keysecondary: string[];
@@ -110,16 +137,39 @@ export interface SillyTavernLorebookExport {
     content: string;
     constant: boolean;
     selective: boolean;
-    selectiveLogic: 0 | 1;
+    selectiveLogic: 0 | 1 | 2 | 3;
     addMemo: boolean;
     order: number;
-    position: 0 | 1 | 2 | 3 | 4;
+    position: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
+    role: number;
     disable: boolean;
     probability: number;
     depth: number;
     group: string;
     useProbability: boolean;
     excluded: boolean;
+    sticky: number;
+    cooldown: number;
+    delay: number;
+    weight: number;
+    scanDepth: number;
+    caseSensitive: boolean;
+    matchWholeWords: boolean;
+    excludeRecursion: boolean;
+    preventRecursion: boolean;
+    useGroupScoring: boolean;
+    matchPersonaDescription: boolean;
+    matchCharacterDescription: boolean;
+    matchCharacterPersonality: boolean;
+    matchCharacterDepthPrompt: boolean;
+    matchScenario: boolean;
+    matchCreatorNotes: boolean;
+    decorators: string[];
+    characterFilter: {
+      isExclude?: boolean;
+      names?: string[];
+      tags?: number[];
+    };
   }>;
   settings?: {
     recursive_scanning?: boolean;
@@ -136,35 +186,15 @@ export interface MatchedEntry {
 
 // ========== Preset Types ==========
 
-export interface PromptBlock {
-  id: string;
-  name: string;
-  content: string;
-  enabled: boolean;
-  position: number;
-  insertionType: 'system' | 'user' | 'assistant';
-  role?: 'system' | 'user' | 'assistant';
-  description?: string;
-}
-
-export interface GenerationParameters {
-  temperature: number;
-  maxTokens: number;
-  topP: number;
-  topK?: number;
-  frequencyPenalty: number;
-  presencePenalty: number;
-  repetitionPenalty?: number;
-  minTokens?: number;
-}
-
+/** SillyTavern-compatible chat completion preset.
+ *  `settings` stores the raw SillyTavern preset JSON (temp_openai, prompt_order, prompts, etc.)
+ */
 export interface ChatPreset {
   id: string;
   name: string;
   description?: string;
-  promptOrder: PromptBlock[];
-  parameters: GenerationParameters;
-  contextLength?: number;
+  /** Raw SillyTavern preset fields. For OpenAI presets this includes temp_openai, prompt_order, prompts, etc. */
+  settings: Record<string, any>;
   createdAt: number;
   updatedAt: number;
 }
@@ -238,61 +268,55 @@ export interface ChatSession {
 
 // ========== Constants ==========
 
-export const DEFAULT_PROMPT_BLOCKS = {
-  SYSTEM_PROMPT: 'system_prompt',
-  WORLD_INFO: 'world_info',
-  CHARACTER_DESCRIPTION: 'character_description',
-  SCENARIO: 'scenario',
-  EXAMPLE_MESSAGES: 'example_messages',
-  CHAT_HISTORY: 'chat_history',
-  USER_INPUT: 'user_input',
-} as const;
+/** Common SillyTavern prompt_order identifiers used in OpenAI presets. */
+export const DEFAULT_PROMPT_ORDER = [
+  { identifier: 'main', name: 'Main Prompt', role: 'system' as const },
+  { identifier: 'worldInfoBefore', name: 'World Info (Before)', role: 'system' as const },
+  { identifier: 'charDescription', name: 'Character Description', role: 'system' as const },
+  { identifier: 'charPersonality', name: 'Character Personality', role: 'system' as const },
+  { identifier: 'scenario', name: 'Scenario', role: 'system' as const },
+  { identifier: 'personaDescription', name: 'Persona Description', role: 'system' as const },
+  { identifier: 'dialogueExamples', name: 'Dialogue Examples', role: 'system' as const },
+  { identifier: 'chatHistory', name: 'Chat History', role: 'system' as const },
+  { identifier: 'worldInfoAfter', name: 'World Info (After)', role: 'system' as const },
+  { identifier: 'groupNudge', name: 'Group Nudge', role: 'system' as const },
+];
 
 export function createDefaultPreset(): Omit<ChatPreset, 'id' | 'createdAt' | 'updatedAt'> {
   return {
     name: '默认预设',
-    description: '基础对话预设',
-    promptOrder: [
-      {
-        id: DEFAULT_PROMPT_BLOCKS.SYSTEM_PROMPT,
-        name: '系统提示',
-        content: '你是一个有帮助的AI助手。',
-        enabled: true,
-        position: 0,
-        insertionType: 'system',
-        role: 'system',
-      },
-      {
-        id: DEFAULT_PROMPT_BLOCKS.WORLD_INFO,
-        name: '世界书',
-        content: '',
-        enabled: true,
-        position: 100,
-        insertionType: 'system',
-        role: 'system',
-        description: '动态插入的世界书条目',
-      },
-      {
-        id: DEFAULT_PROMPT_BLOCKS.CHARACTER_DESCRIPTION,
-        name: '角色定义',
-        content: '',
-        enabled: true,
-        position: 200,
-        insertionType: 'system',
-        role: 'system',
-      },
-    ],
-    parameters: {
-      temperature: 0.8,
-      maxTokens: 2048,
-      topP: 0.9,
-      topK: 40,
-      frequencyPenalty: 0,
-      presencePenalty: 0,
-      repetitionPenalty: 1.0,
-      minTokens: 0,
+    description: 'SillyTavern 兼容的默认 OpenAI 预设',
+    settings: {
+      temp_openai: 0.8,
+      freq_pen_openai: 0,
+      pres_pen_openai: 0,
+      top_p_openai: 0.9,
+      top_k_openai: 0,
+      top_a_openai: 0,
+      min_p_openai: 0,
+      repetition_penalty_openai: 1,
+      openai_max_context: 4096,
+      openai_max_tokens: 2048,
+      stream_openai: false,
+      max_context_unlocked: false,
+      chat_completion_source: 'openai',
+      openai_model: 'gpt-3.5-turbo',
+      main: 'Write {{char}}\'s next reply in a fictional chat between {{char}} and {{user}}.',
+      nsfw: '',
+      jailbreak: '',
+      enhanceDefinitions: '',
+      impersonation_prompt: '',
+      new_chat_prompt: '',
+      new_group_chat_prompt: '',
+      new_example_chat_prompt: '',
+      continue_nudge_prompt: '',
+      wi_format: '',
+      group_nudge_prompt: '',
+      scenario_format: '',
+      personality_format: '',
+      prompts: [],
+      prompt_order: DEFAULT_PROMPT_ORDER.map((p, i) => ({ ...p, enabled: true })),
     },
-    contextLength: 4096,
   };
 }
 ```
@@ -494,6 +518,7 @@ export class LorebookEngine {
   groupByPosition(matched: MatchedEntry[]): Record<LorebookEntry['position'], MatchedEntry[]> {
     const grouped: Record<LorebookEntry['position'], MatchedEntry[]> = {
       before_char: [], after_char: [], before_example: [], after_example: [], at_depth: [],
+      example_msg_top: [], example_msg_bottom: [], outlet: [],
     };
 
     for (const m of matched) {
@@ -514,21 +539,47 @@ export class LorebookEngine {
     if (keys.length === 0) return false;
 
     const primaryMatches = keys.map(k => this.containsKeyword(text, this.normalizeKeyword(k)));
-    const hasPrimaryMatch = selectiveLogic === 'and'
-      ? primaryMatches.every(m => m)
-      : primaryMatches.some(m => m);
+    const allPrimary = primaryMatches.every(m => m);
+    const anyPrimary = primaryMatches.some(m => m);
 
-    if (!hasPrimaryMatch) return false;
+    let primaryOk = false;
+    switch (selectiveLogic) {
+      case 'and_all':
+      case 'and_any':
+        primaryOk = anyPrimary; // For simple frontend integration, both and_any/and_all treat primary as OR-ish trigger
+        break;
+      case 'not_all':
+        primaryOk = !allPrimary;
+        break;
+      case 'not_any':
+        primaryOk = !anyPrimary;
+        break;
+      default:
+        primaryOk = anyPrimary;
+    }
+
+    if (!primaryOk) return false;
 
     if (!selective || secondaryKeys.length === 0) {
-      return hasPrimaryMatch;
+      return primaryOk;
     }
 
     const secondaryMatches = secondaryKeys.map(k =>
       this.containsKeyword(context, this.normalizeKeyword(k))
     );
+    const allSecondary = secondaryMatches.every(m => m);
+    const anySecondary = secondaryMatches.some(m => m);
 
-    return secondaryMatches.some(m => m);
+    switch (selectiveLogic) {
+      case 'and_all':
+        return allSecondary;
+      case 'not_all':
+        return allSecondary;
+      case 'and_any':
+      case 'not_any':
+      default:
+        return anySecondary;
+    }
   }
 
   private normalizeKeyword(keyword: string): string {
@@ -561,7 +612,6 @@ export function createLorebookEngine(lorebook: Lorebook): LorebookEngine {
  */
 
 import type { ChatPreset, Lorebook, ChatMessage, MatchedEntry } from './types';
-import { DEFAULT_PROMPT_BLOCKS } from './types';
 import { createLorebookEngine } from './lorebook-engine';
 import { formatVariablesForPrompt } from './variables';
 
@@ -597,7 +647,7 @@ export function assemblePrompt(options: AssembleOptions): AssembleResult {
     new Map(allMatchedEntries.map(e => [e.entry.id, e])).values()
   ).sort((a, b) => a.score - b.score);
 
-  const maxContextTokens = preset.contextLength || 4096;
+  const maxContextTokens = preset.settings.openai_max_context || preset.settings.max_length || 4096;
   let currentTokens = 0;
 
   const recentHistory: { role: 'system' | 'user' | 'assistant'; content: string }[] = [];
@@ -610,15 +660,71 @@ export function assemblePrompt(options: AssembleOptions): AssembleResult {
     currentTokens += msgTokens;
   }
 
-  const sortedBlocks = preset.promptOrder
-    .filter(b => b.enabled)
-    .sort((a, b) => a.position - b.position);
+  const promptOrder = (preset.settings.prompt_order || []) as Array<{
+    identifier: string;
+    name?: string;
+    role?: 'system' | 'user' | 'assistant';
+    enabled?: boolean;
+  }>;
+
+  const prompts = (preset.settings.prompts || []) as Array<{
+    identifier: string;
+    role?: 'system' | 'user' | 'assistant';
+    content?: string;
+  }>;
+
+  function resolvePromptContent(identifier: string): string | null {
+    // Dynamic content for world info
+    if (identifier === 'worldInfoBefore' || identifier === 'worldInfoAfter') {
+      const content = uniqueEntries.map(e => e.entry.content).join('\n\n');
+      return content || null;
+    }
+    // Character / scenario placeholders (can be filled when character cards are implemented)
+    if (identifier === 'charDescription') {
+      return preset.settings.character_description || null;
+    }
+    if (identifier === 'charPersonality') {
+      return preset.settings.character_personality || null;
+    }
+    if (identifier === 'scenario') {
+      return preset.settings.scenario || null;
+    }
+    if (identifier === 'personaDescription') {
+      return preset.settings.persona_description || null;
+    }
+    if (identifier === 'dialogueExamples') {
+      return preset.settings.dialogue_examples || null;
+    }
+    if (identifier === 'groupNudge') {
+      return preset.settings.group_nudge_prompt || null;
+    }
+    if (identifier === 'impersonate') {
+      return preset.settings.impersonation_prompt || null;
+    }
+    if (identifier === 'quietPrompt') {
+      return preset.settings.quiet_prompt || null;
+    }
+    if (identifier === 'bias') {
+      return null;
+    }
+    // Custom prompts array
+    const custom = prompts.find(p => p.identifier === identifier);
+    if (custom?.content) return custom.content;
+    // Direct preset fields (main, nsfw, jailbreak, enhanceDefinitions, etc.)
+    const direct = preset.settings[identifier];
+    if (typeof direct === 'string' && direct.trim()) return direct;
+    return null;
+  }
 
   const assembledMessages: { role: 'system' | 'user' | 'assistant'; content: string }[] = [];
   let systemAccumulator = '';
+  let hasChatHistory = false;
 
-  for (const block of sortedBlocks) {
-    if (block.id === DEFAULT_PROMPT_BLOCKS.CHAT_HISTORY) {
+  for (const item of promptOrder) {
+    if (item.enabled === false) continue;
+
+    if (item.identifier === 'chatHistory') {
+      hasChatHistory = true;
       if (systemAccumulator) {
         assembledMessages.push({ role: 'system', content: systemAccumulator });
         systemAccumulator = '';
@@ -627,30 +733,13 @@ export function assemblePrompt(options: AssembleOptions): AssembleResult {
       continue;
     }
 
-    if (block.id === DEFAULT_PROMPT_BLOCKS.USER_INPUT) {
-      if (systemAccumulator) {
-        assembledMessages.push({ role: 'system', content: systemAccumulator });
-        systemAccumulator = '';
-      }
-      assembledMessages.push({ role: 'user', content: userInput });
-      continue;
-    }
+    const rawContent = resolvePromptContent(item.identifier);
+    if (!rawContent) continue;
 
-    let content = block.content;
-    content = replaceMacros(content, { userName, characterName, userInput, variables });
-
-    if (block.id === DEFAULT_PROMPT_BLOCKS.WORLD_INFO) {
-      const worldInfoContent = uniqueEntries.map(e => e.entry.content).join('\n\n');
-      if (worldInfoContent) {
-        content = worldInfoContent;
-      } else {
-        continue;
-      }
-    }
-
+    let content = replaceMacros(rawContent, { userName, characterName, userInput, variables });
     if (!content.trim()) continue;
 
-    const role = block.role || block.insertionType || 'system';
+    const role = item.role || 'system';
     if (role === 'system') {
       systemAccumulator += (systemAccumulator ? '\n\n' : '') + content;
     } else {
@@ -671,19 +760,13 @@ export function assemblePrompt(options: AssembleOptions): AssembleResult {
     assembledMessages.unshift({ role: 'system', content: systemAccumulator });
   }
 
-  // Fallback: append history and user input if their blocks weren't configured
-  if (!sortedBlocks.some(b => b.id === DEFAULT_PROMPT_BLOCKS.CHAT_HISTORY)) {
-    const userIdx = assembledMessages.findIndex(m => m.role === USER_ROLE);
-    if (userIdx === -1) {
-      assembledMessages.push(...recentHistory);
-    } else {
-      assembledMessages.splice(userIdx, 0, ...recentHistory);
-    }
+  // Fallback: append history if prompt_order didn't include it
+  if (!hasChatHistory) {
+    assembledMessages.push(...recentHistory);
   }
 
-  if (!sortedBlocks.some(b => b.id === DEFAULT_PROMPT_BLOCKS.USER_INPUT)) {
-    assembledMessages.push({ role: 'user', content: userInput });
-  }
+  // Always append the current user input as the final message
+  assembledMessages.push({ role: 'user', content: userInput });
 
   const systemPrompt = assembledMessages
     .filter(m => m.role === 'system')
@@ -735,35 +818,83 @@ export const SUPPORTED_MACROS = [
  * SillyTavern Import/Export Adapter
  */
 
-import type { Lorebook, LorebookEntry, ChatPreset, PromptBlock, SillyTavernLorebookExport } from './types';
+import type { Lorebook, LorebookEntry, ChatPreset, SillyTavernLorebookExport } from './types';
 
 const POSITION_MAP: Record<number, LorebookEntry['position']> = {
-  0: 'before_char', 1: 'after_char', 2: 'before_example', 3: 'after_example', 4: 'at_depth',
+  0: 'before_char',
+  1: 'after_char',
+  2: 'before_example',
+  3: 'after_example',
+  4: 'at_depth',
+  5: 'example_msg_top',
+  6: 'example_msg_bottom',
+  7: 'outlet',
 };
 
 const REVERSE_POSITION_MAP: Record<LorebookEntry['position'], number> = {
-  before_char: 0, after_char: 1, before_example: 2, after_example: 3, at_depth: 4,
+  before_char: 0,
+  after_char: 1,
+  before_example: 2,
+  after_example: 3,
+  at_depth: 4,
+  example_msg_top: 5,
+  example_msg_bottom: 6,
+  outlet: 7,
 };
 
-const LOGIC_MAP: Record<number, 'and' | 'or'> = { 0: 'and', 1: 'or' };
+const LOGIC_MAP: Record<number, LorebookEntry['selectiveLogic']> = {
+  0: 'and_any',
+  1: 'not_all',
+  2: 'not_any',
+  3: 'and_all',
+};
+
+const REVERSE_LOGIC_MAP: Record<LorebookEntry['selectiveLogic'], number> = {
+  and_any: 0,
+  not_all: 1,
+  not_any: 2,
+  and_all: 3,
+};
 
 export function importLorebook(data: SillyTavernLorebookExport): Omit<Lorebook, 'id' | 'createdAt' | 'updatedAt'> {
-  const entries: LorebookEntry[] = (data.entries || [])
+  const rawEntries = Object.values(data.entries || {});
+  const entries: LorebookEntry[] = rawEntries
     .filter((e) => !e.disable && !e.excluded)
     .map((e) => ({
       id: crypto.randomUUID(),
       keys: e.key || [],
       secondaryKeys: e.keysecondary || [],
       content: e.content || '',
+      comment: e.comment,
       order: e.order ?? 100,
-      position: POSITION_MAP[e.position ?? 1],
+      position: POSITION_MAP[e.position ?? 1] ?? 'after_char',
       depth: e.depth,
+      role: e.role,
       selective: e.selective ?? false,
-      selectiveLogic: LOGIC_MAP[e.selectiveLogic ?? 1],
+      selectiveLogic: LOGIC_MAP[e.selectiveLogic ?? 1] ?? 'not_all',
       constant: e.constant ?? false,
       probability: e.useProbability ? (e.probability ?? 100) : 100,
+      useProbability: e.useProbability ?? false,
       addMemo: e.addMemo ?? false,
-      comment: e.comment,
+      sticky: e.sticky,
+      cooldown: e.cooldown,
+      delay: e.delay,
+      weight: e.weight,
+      scanDepth: e.scanDepth,
+      caseSensitive: e.caseSensitive,
+      matchWholeWords: e.matchWholeWords,
+      excludeRecursion: e.excludeRecursion,
+      preventRecursion: e.preventRecursion,
+      useGroupScoring: e.useGroupScoring,
+      matchPersonaDescription: e.matchPersonaDescription,
+      matchCharacterDescription: e.matchCharacterDescription,
+      matchCharacterPersonality: e.matchCharacterPersonality,
+      matchCharacterDepthPrompt: e.matchCharacterDepthPrompt,
+      matchScenario: e.matchScenario,
+      matchCreatorNotes: e.matchCreatorNotes,
+      group: e.group,
+      decorators: e.decorators,
+      characterFilter: e.characterFilter,
     }));
 
   return {
@@ -777,10 +908,9 @@ export function importLorebook(data: SillyTavernLorebookExport): Omit<Lorebook, 
 }
 
 export function exportLorebook(lorebook: Lorebook): SillyTavernLorebookExport {
-  return {
-    name: lorebook.name,
-    description: lorebook.description,
-    entries: lorebook.entries.map((e, index) => ({
+  const entries: SillyTavernLorebookExport['entries'] = {};
+  lorebook.entries.forEach((e, index) => {
+    entries[String(index)] = {
       uid: index,
       key: e.keys,
       keysecondary: e.secondaryKeys || [],
@@ -788,22 +918,64 @@ export function exportLorebook(lorebook: Lorebook): SillyTavernLorebookExport {
       content: e.content,
       constant: e.constant,
       selective: e.selective,
-      selectiveLogic: (e.selectiveLogic === 'and' ? 0 : 1) as 0 | 1,
+      selectiveLogic: (REVERSE_LOGIC_MAP[e.selectiveLogic] ?? 1) as 0 | 1 | 2 | 3,
       addMemo: e.addMemo,
       order: e.order,
-      position: REVERSE_POSITION_MAP[e.position] as 0 | 1 | 2 | 3 | 4,
+      position: REVERSE_POSITION_MAP[e.position] as 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7,
+      role: e.role ?? 0,
       disable: false,
       probability: e.probability,
       depth: e.depth ?? 4,
-      group: '',
-      useProbability: e.probability < 100,
+      group: e.group ?? '',
+      useProbability: e.useProbability ?? (e.probability < 100),
       excluded: false,
-    })),
+      sticky: e.sticky ?? 0,
+      cooldown: e.cooldown ?? 0,
+      delay: e.delay ?? 0,
+      weight: e.weight ?? 100,
+      scanDepth: e.scanDepth ?? 0,
+      caseSensitive: e.caseSensitive ?? false,
+      matchWholeWords: e.matchWholeWords ?? false,
+      excludeRecursion: e.excludeRecursion ?? false,
+      preventRecursion: e.preventRecursion ?? false,
+      useGroupScoring: e.useGroupScoring ?? false,
+      matchPersonaDescription: e.matchPersonaDescription ?? false,
+      matchCharacterDescription: e.matchCharacterDescription ?? false,
+      matchCharacterPersonality: e.matchCharacterPersonality ?? false,
+      matchCharacterDepthPrompt: e.matchCharacterDepthPrompt ?? false,
+      matchScenario: e.matchScenario ?? false,
+      matchCreatorNotes: e.matchCreatorNotes ?? false,
+      decorators: e.decorators ?? [],
+      characterFilter: e.characterFilter ?? { isExclude: false, names: [], tags: [] },
+    };
+  });
+
+  return {
+    name: lorebook.name,
+    description: lorebook.description,
+    entries,
     settings: {
       recursive_scanning: lorebook.recursiveScanning,
       case_sensitive: lorebook.caseSensitive,
       match_whole_words: lorebook.matchWholeWords,
     },
+  };
+}
+
+export function importPreset(data: Record<string, any>): Omit<ChatPreset, 'id' | 'createdAt' | 'updatedAt'> {
+  const name = data.preset || data.name || '导入的预设';
+  return {
+    name,
+    description: data.description,
+    settings: data,
+  };
+}
+
+export function exportPreset(preset: ChatPreset): Record<string, any> {
+  return {
+    ...preset.settings,
+    name: preset.name,
+    description: preset.description,
   };
 }
 
@@ -1630,6 +1802,133 @@ export function ChatModal({ onClose }: ChatModalProps) {
 }
 ```
 
+### React — PresetModal.tsx
+
+```tsx
+import { useState } from 'react';
+import { useSillytavern } from '../../hooks/useSillytavern';
+import { importJsonFile, importPreset, exportPreset, exportToJson } from '../../sillytavern/importer';
+import type { ChatPreset } from '../../sillytavern';
+
+interface PresetModalProps {
+  onClose: () => void;
+}
+
+export function PresetModal({ onClose }: PresetModalProps) {
+  const { presets, settings, updateSettings, savePreset, deletePreset } = useSillytavern();
+  const [editing, setEditing] = useState<ChatPreset | null>(null);
+
+  const handleImport = async () => {
+    const data = await importJsonFile<Record<string, any>>();
+    if (!data) return;
+    const imported = importPreset(data);
+    const newPreset: ChatPreset = {
+      ...imported,
+      id: crypto.randomUUID(),
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    } as ChatPreset;
+    await savePreset(newPreset);
+    if (!settings?.activePresetId) {
+      await updateSettings({ activePresetId: newPreset.id });
+    }
+  };
+
+  const handleExport = (preset: ChatPreset) => {
+    exportToJson(exportPreset(preset), `${preset.name}.json`);
+  };
+
+  const handleSelect = async (id: string) => {
+    await updateSettings({ activePresetId: id });
+  };
+
+  const handleDelete = async (id: string) => {
+    await deletePreset(id);
+    if (settings?.activePresetId === id) {
+      await updateSettings({ activePresetId: presets.find(p => p.id !== id)?.id || null });
+    }
+  };
+
+  const startEdit = (preset: ChatPreset) => setEditing({ ...preset });
+
+  const saveEdit = async () => {
+    if (!editing) return;
+    await savePreset({ ...editing, updatedAt: Date.now() });
+    setEditing(null);
+  };
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <header>
+          <h3>预设管理</h3>
+          <button onClick={onClose}>关闭</button>
+        </header>
+        <div className="preset-list">
+          <button onClick={handleImport}>导入 SillyTavern 预设</button>
+          {editing ? (
+            <div className="preset-editor">
+              <input
+                value={editing.name}
+                onChange={(e) => setEditing({ ...editing, name: e.target.value })}
+                placeholder="预设名称"
+              />
+              <label>
+                温度
+                <input
+                  type="number"
+                  value={editing.settings.temp_openai ?? 0.8}
+                  onChange={(e) => setEditing({
+                    ...editing,
+                    settings: { ...editing.settings, temp_openai: Number(e.target.value) }
+                  })}
+                  step={0.1}
+                />
+              </label>
+              <label>
+                Max Tokens
+                <input
+                  type="number"
+                  value={editing.settings.openai_max_tokens ?? 2048}
+                  onChange={(e) => setEditing({
+                    ...editing,
+                    settings: { ...editing.settings, openai_max_tokens: Number(e.target.value) }
+                  })}
+                />
+              </label>
+              <label>
+                模型
+                <input
+                  value={editing.settings.openai_model || ''}
+                  onChange={(e) => setEditing({
+                    ...editing,
+                    settings: { ...editing.settings, openai_model: e.target.value }
+                  })}
+                  placeholder="例如 gpt-3.5-turbo"
+                />
+              </label>
+              <button onClick={saveEdit}>保存</button>
+              <button onClick={() => setEditing(null)}>取消</button>
+            </div>
+          ) : (
+            <ul>
+              {presets.map((preset) => (
+                <li key={preset.id} className={preset.id === settings?.activePresetId ? 'active' : ''}>
+                  <span onClick={() => handleSelect(preset.id)}>{preset.name}</span>
+                  <button onClick={() => handleExport(preset)}>导出</button>
+                  <button onClick={() => startEdit(preset)}>编辑</button>
+                  <button onClick={() => handleDelete(preset.id)}>删除</button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+```
+
 ### Vue — VariablePanel.vue
 
 ```vue
@@ -1820,14 +2119,109 @@ const emit = defineEmits<{ close: [] }>();
 </script>
 ```
 
+### Vue — PresetModal.vue
+
+```vue
+<template>
+  <div class="modal-overlay" @click="emit('close')">
+    <div class="modal" @click.stop>
+      <header>
+        <h3>预设管理</h3>
+        <button @click="emit('close')">关闭</button>
+      </header>
+      <div class="preset-list">
+        <button @click="handleImport">导入 SillyTavern 预设</button>
+        <div v-if="editing" class="preset-editor">
+          <input v-model="editing.name" placeholder="预设名称" />
+          <label>温度 <input type="number" v-model.number="editing.settings.temp_openai" step="0.1" /></label>
+          <label>Max Tokens <input type="number" v-model.number="editing.settings.openai_max_tokens" /></label>
+          <label>模型 <input v-model="editing.settings.openai_model" placeholder="例如 gpt-3.5-turbo" /></label>
+          <button @click="saveEdit">保存</button>
+          <button @click="editing = null">取消</button>
+        </div>
+        <ul v-else>
+          <li
+            v-for="preset in presets"
+            :key="preset.id"
+            :class="{ active: preset.id === settings?.activePresetId }"
+          >
+            <span @click="handleSelect(preset.id)">{{ preset.name }}</span>
+            <button @click.stop="handleExport(preset)">导出</button>
+            <button @click.stop="startEdit(preset)">编辑</button>
+            <button @click.stop="handleDelete(preset.id)">删除</button>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { ref } from 'vue';
+import { useSillytavern } from '../../composables/useSillytavern';
+import { importJsonFile, importPreset, exportPreset, exportToJson } from '../../sillytavern/importer';
+import type { ChatPreset } from '../../sillytavern';
+
+const { presets, settings, updateSettings, savePreset, deletePreset } = useSillytavern();
+const emit = defineEmits<{ close: [] }>();
+const editing = ref<ChatPreset | null>(null);
+
+const handleImport = async () => {
+  const data = await importJsonFile<Record<string, any>>();
+  if (!data) return;
+  const imported = importPreset(data);
+  const newPreset: ChatPreset = {
+    ...imported,
+    id: crypto.randomUUID(),
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  } as ChatPreset;
+  await savePreset(newPreset);
+  if (!settings.value?.activePresetId) {
+    await updateSettings({ activePresetId: newPreset.id });
+  }
+};
+
+const handleExport = (preset: ChatPreset) => {
+  exportToJson(exportPreset(preset), `${preset.name}.json`);
+};
+
+const handleSelect = async (id: string) => {
+  await updateSettings({ activePresetId: id });
+};
+
+const handleDelete = async (id: string) => {
+  await deletePreset(id);
+  if (settings.value?.activePresetId === id) {
+    await updateSettings({ activePresetId: presets.value.find(p => p.id !== id)?.id || null });
+  }
+};
+
+const startEdit = (preset: ChatPreset) => {
+  editing.value = { ...preset };
+};
+
+const saveEdit = async () => {
+  if (!editing.value) return;
+  await savePreset({ ...editing.value, updatedAt: Date.now() });
+  editing.value = null;
+};
+</script>
+```
+
 ### Vanilla 使用示例
 
 ```html
 <div id="app">
   <button id="chat-modal-btn">聊天</button>
+  <button id="preset-modal-btn">预设</button>
   <div id="chat-modal" style="display:none;">
     <button id="new-chat">+ 新对话</button>
     <ul id="chat-list"></ul>
+  </div>
+  <div id="preset-modal" style="display:none;">
+    <button id="import-preset">导入 SillyTavern 预设</button>
+    <ul id="preset-list"></ul>
   </div>
   <div id="chat-view">
     <div id="variables" style="margin-bottom:8px;"></div>
@@ -1839,6 +2233,7 @@ const emit = defineEmits<{ close: [] }>();
 
 <script type="module">
   import { sillytavernStore } from './sillytavern';
+  import { importJsonFile, importPreset, exportPreset, exportToJson } from './sillytavern/importer';
 
   await sillytavernStore.loadAll();
 
@@ -1852,6 +2247,18 @@ const emit = defineEmits<{ close: [] }>();
     el.innerHTML = entries.map(([k, v]) => `
       <span class="var-badge">${k}: ${v}</span>
     `).join(' ');
+  };
+
+  const renderPresets = () => {
+    const list = document.getElementById('preset-list');
+    const { presets, settings } = sillytavernStore;
+    list.innerHTML = presets.map(p => `
+      <li class="${p.id === settings?.activePresetId ? 'active' : ''}" data-id="${p.id}">
+        ${p.name}
+        <button class="export" data-id="${p.id}">导出</button>
+        <button class="del" data-id="${p.id}">删除</button>
+      </li>
+    `).join('');
   };
 
   const renderChats = () => {
@@ -1882,8 +2289,12 @@ const emit = defineEmits<{ close: [] }>();
     renderVariables();
   };
 
-  const unsubscribe = sillytavernStore.subscribe(renderChats);
+  const unsubscribe = sillytavernStore.subscribe(() => {
+    renderChats();
+    renderPresets();
+  });
   renderChats();
+  renderPresets();
   // Call unsubscribe() before tearing down the page or re-initializing.
 
   document.getElementById('new-chat').onclick = () => sillytavernStore.createChat();
@@ -1892,12 +2303,47 @@ const emit = defineEmits<{ close: [] }>();
     el.style.display = el.style.display === 'none' ? 'block' : 'none';
   };
 
+  document.getElementById('preset-modal-btn').onclick = () => {
+    const el = document.getElementById('preset-modal');
+    el.style.display = el.style.display === 'none' ? 'block' : 'none';
+  };
+
+  document.getElementById('import-preset').onclick = async () => {
+    const data = await importJsonFile();
+    if (!data) return;
+    const imported = importPreset(data);
+    const newPreset = {
+      ...imported,
+      id: crypto.randomUUID(),
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    await sillytavernStore.savePreset(newPreset);
+    if (!sillytavernStore.settings?.activePresetId) {
+      await sillytavernStore.updateSettings({ activePresetId: newPreset.id });
+    }
+  };
+
   document.getElementById('chat-list').onclick = (e) => {
     const li = e.target.closest('li');
     if (e.target.classList.contains('del')) {
       sillytavernStore.deleteChat(e.target.dataset.id);
     } else if (li) {
       sillytavernStore.loadChat(li.dataset.id);
+    }
+  };
+
+  document.getElementById('preset-list').onclick = (e) => {
+    const li = e.target.closest('li');
+    const id = li?.dataset.id;
+    if (!id) return;
+    if (e.target.classList.contains('del')) {
+      sillytavernStore.deletePreset(id);
+    } else if (e.target.classList.contains('export')) {
+      const preset = sillytavernStore.presets.find(p => p.id === id);
+      if (preset) exportToJson(exportPreset(preset), `${preset.name}.json`);
+    } else {
+      sillytavernStore.updateSettings({ activePresetId: id });
     }
   };
 

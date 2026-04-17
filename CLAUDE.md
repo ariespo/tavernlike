@@ -133,8 +133,10 @@ interface LorebookEntry {
 interface ChatPreset {
   id: string;
   name: string;
-  promptOrder: PromptBlock[];    // 提示词组装顺序
-  parameters: GenerationParameters;  // 温度、max_tokens 等
+  description?: string;
+  settings: Record<string, any>; // SillyTavern 原始预设数据（temp_openai, prompt_order, prompts 等）
+  createdAt: number;
+  updatedAt: number;
 }
 ```
 
