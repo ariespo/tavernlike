@@ -139,6 +139,12 @@ export interface ApiSettings {
   apiKey: string;
   model: string;
   timeout: number;
+  secondary?: {
+    enabled: boolean;
+    baseUrl: string;
+    apiKey: string;
+    model: string;
+  };
 }
 
 export interface AppSettings {
@@ -152,7 +158,23 @@ export interface AppSettings {
   language: 'zh' | 'en';
   autoSave: boolean;
   autoSaveInterval: number;
+  uiMode: 'game' | 'chat';
+  customTags: string[];
+  formatPromptTemplate: string;
+  thinkingDisplay: 'fold' | 'hide' | 'inline';
 }
+
+export const DEFAULT_FORMAT_PROMPT = `你必须严格按照以下 XML 标签格式输出回复，不要使用 Markdown 包裹：
+<thinking>……</thinking>     ← 可选；内部任何字符都视为思考过程，不被解析
+<maintext>……</maintext>     ← 必填；本回合的剧情正文，可多段，保留换行
+<option>选项 A
+选项 B
+选项 C</option>              ← 必填；至少 2 项，每行一个
+<sum>……</sum>               ← 必填；本回合一句话总结
+<vars>{ "金钱": +10, "HP": 38 }</vars>   ← 选填；JSON 深合并`;
+
+export const DEFAULT_TAGS = ['maintext', 'option', 'sum', 'vars', 'thinking', 'think'] as const;
+export const DEFAULT_OPAQUE_TAGS = ['thinking', 'think'] as const;
 
 export const DEFAULT_SETTINGS: AppSettings = {
   api: {
@@ -169,6 +191,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
   language: 'zh',
   autoSave: true,
   autoSaveInterval: 30,
+  uiMode: 'game',
+  customTags: ['maintext', 'option', 'sum', 'vars', 'thinking', 'think'],
+  formatPromptTemplate: DEFAULT_FORMAT_PROMPT,
+  thinkingDisplay: 'fold',
 };
 
 // ========== Chat Types ==========
@@ -184,6 +210,9 @@ export interface ChatMessage {
     lorebookEntries?: string[];
     processingTime?: number;
   };
+  parsed?: ParsedTags;
+  variablesAfter?: Record<string, any>;
+  apiUsed?: ApiTarget;
 }
 
 export interface ChatSession {
@@ -194,7 +223,7 @@ export interface ChatSession {
   userName: string;
   presetId: string | null;
   lorebookIds: string[];
-  variables?: Record<string, string | number>;
+  variables: Record<string, any>;
   createdAt: number;
   updatedAt: number;
 }
@@ -252,3 +281,23 @@ export function createDefaultPreset(): Omit<ChatPreset, 'id' | 'createdAt' | 'up
     },
   };
 }
+
+// ========== v3 Game Mode Types ==========
+
+export interface ParsedTags {
+  thinking: string;
+  maintext: string;
+  options: string[];
+  sum: string;
+  varsRaw: string;
+  varsCommands: VarsPatch;
+  unknown: Record<string, string>;
+}
+
+export interface VarsPatch {
+  /** Object that will be deep-merged into chat.variables */
+  merge: Record<string, any>;
+}
+
+export type Task = 'story' | 'summary' | 'vars';
+export type ApiTarget = 'primary' | 'secondary';
