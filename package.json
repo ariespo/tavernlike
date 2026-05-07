@@ -1,0 +1,21 @@
+{
+  "name": "tavernlike-skill",
+  "version": "3.0.0-dev",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@vitest/ui": "^1.0.0",
+    "happy-dom": "^20.9.0",
+    "typescript": "^5.4.0",
+    "vitest": "^1.6.0"
+  },
+  "dependencies": {
+    "dexie": "^4.0.1"
+  }
+}
