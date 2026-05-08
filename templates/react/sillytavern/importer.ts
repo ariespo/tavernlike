@@ -193,3 +193,34 @@ export function exportToJson(data: unknown, filename: string): void {
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
 }
+
+export interface MultiImportInput {
+  fileName: string;
+  json: SillyTavernLorebookExport;
+}
+
+export interface MultiImportResults {
+  successes: Array<{ fileName: string; lorebook: ReturnType<typeof importLorebook> }>;
+  failures: Array<{ fileName: string; error: string }>;
+}
+
+export function importMultipleLorebooks(inputs: MultiImportInput[]): MultiImportResults {
+  const successes: MultiImportResults['successes'] = [];
+  const failures: MultiImportResults['failures'] = [];
+  for (const input of inputs) {
+    try {
+      if (!input.json || typeof input.json !== 'object' || Array.isArray(input.json)) {
+        throw new Error('Invalid lorebook JSON: expected an object');
+      }
+      const lb = importLorebook(input.json);
+      successes.push({ fileName: input.fileName, lorebook: lb });
+    } catch (e) {
+      failures.push({ fileName: input.fileName, error: String((e as Error).message ?? e) });
+    }
+  }
+  return { successes, failures };
+}
+
+export function renameLorebook(lb: Lorebook, newName: string): Lorebook {
+  return { ...lb, name: newName, updatedAt: Date.now() };
+}
