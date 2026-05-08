@@ -29,6 +29,12 @@
 ### React 集成
 - `useSillytavern.ts` - 组合式 Hook，管理所有状态（支持消息编辑/删除后续/分支）
 
+### v3 新增（仅 React）
+- `stream-parser.ts` - 流式 XML 标签解析器，含 opaque thinking 区
+- `vars-merger.ts` - `<vars>` JSON 深合并
+- `api-router.ts` - 主/次 API 任务路由
+- `GameView` + `ThinkingFold` / `MainTextPane` / `OptionList` / `HistoryDrawer` - 游戏式 UI
+
 ## 自动化流程
 
 ```
@@ -171,6 +177,7 @@ src/
 
 ## 版本历史
 
+- **v3.0.0** - React 游戏模式（streaming parser / multi-API / floor variable snapshot / lorebook rename / multi-import）
 - **v2.0.0** - 全自动版本，嵌入所有代码，无需外部依赖
 - **v1.0.0** - 初始版本，指导型 skill
 

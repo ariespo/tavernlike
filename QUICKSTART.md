@@ -197,6 +197,20 @@ A: 任何 OpenAI API 格式：
 
 ---
 
+## 游戏模式速通（v3，React）
+
+```tsx
+import { GameView } from './components/SillyTavern/GameView';
+
+function App() {
+  return <GameView />;
+}
+```
+
+- 在设置中填主 API → 自动从 settings.formatPromptTemplate 注入格式约定
+- 默认显示 6 标签：`<maintext>`/`<option>`/`<sum>`/`<vars>`/`<thinking>`/`<think>`
+- 切回聊天列表：Settings → 显示 → UI 模式 → 聊天列表
+
 ## 下一步
 
 1. ✅ 运行 `/sillytavern-web` 完成安装
