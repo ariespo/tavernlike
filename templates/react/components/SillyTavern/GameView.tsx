@@ -3,6 +3,7 @@ import { useSillytavern } from '../../hooks/useSillytavern';
 import { ThinkingFold } from './ThinkingFold';
 import { MainTextPane } from './MainTextPane';
 import { OptionList } from './OptionList';
+import { HistoryDrawer } from './HistoryDrawer';
 
 export function GameView() {
   const st = useSillytavern();
@@ -47,8 +48,4 @@ export function GameView() {
       {historyOpen && <HistoryDrawer onClose={() => setHistoryOpen(false)} />}
     </div>
   );
-}
-
-function HistoryDrawer({ onClose }: { onClose: () => void }) {
-  return <div onClick={onClose}>历史抽屉占位 — 见下一 task</div>;
 }
