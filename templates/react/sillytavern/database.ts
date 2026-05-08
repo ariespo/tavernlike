@@ -7,7 +7,7 @@ import type { Lorebook, ChatPreset, AppSettings, ChatSession } from './types';
 import { DEFAULT_SETTINGS } from './types';
 
 const DB_NAME = 'SillyTavernWebDB';
-const DB_VERSION = 1;
+const DB_VERSION = 3;
 
 class AppDatabase extends Dexie {
   lorebooks!: Table<Lorebook>;
@@ -17,11 +17,35 @@ class AppDatabase extends Dexie {
 
   constructor() {
     super(DB_NAME);
-    this.version(DB_VERSION).stores({
+    this.version(1).stores({
       lorebooks: 'id, name, updatedAt',
       presets: 'id, name, updatedAt',
       settings: 'key',
       chats: 'id, name, updatedAt',
+    });
+    this.version(2).stores({
+      lorebooks: 'id, name, updatedAt',
+      presets: 'id, name, updatedAt',
+      settings: 'key',
+      chats: 'id, name, updatedAt',
+    });
+    this.version(3).stores({
+      lorebooks: 'id, name, updatedAt',
+      presets: 'id, name, updatedAt',
+      settings: 'key',
+      chats: 'id, name, updatedAt',
+    }).upgrade(async tx => {
+      const settings = await tx.table('settings').toCollection().toArray();
+      for (const s of settings) {
+        if (s.uiMode === undefined) s.uiMode = 'game';
+        if (s.customTags === undefined) s.customTags = ['maintext', 'option', 'sum', 'vars', 'thinking', 'think'];
+        if (s.thinkingDisplay === undefined) s.thinkingDisplay = 'fold';
+        if (s.formatPromptTemplate === undefined) s.formatPromptTemplate = '';
+        if (s.api && s.api.secondary === undefined) {
+          s.api.secondary = { enabled: false, baseUrl: '', apiKey: '', model: '' };
+        }
+        await tx.table('settings').put(s);
+      }
     });
   }
 }
@@ -108,4 +132,13 @@ export async function saveChat(chat: ChatSession): Promise<string> {
 
 export async function deleteChat(id: string): Promise<void> {
   await getDatabase().chats.delete(id);
+}
+
+export async function setVariables(chatId: string, variables: Record<string, any>): Promise<void> {
+  const db = getDatabase();
+  const chat = await db.chats.get(chatId);
+  if (!chat) return;
+  chat.variables = variables;
+  chat.updatedAt = Date.now();
+  await db.chats.put(chat);
 }
