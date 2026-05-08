@@ -14,6 +14,8 @@ export interface AssembleOptions {
   userName: string;
   characterName: string;
   variables?: Record<string, string | number>;
+  extraVariables?: Record<string, any>;
+  formatPrompt?: string;
 }
 
 export interface AssembleResult {
@@ -23,7 +25,7 @@ export interface AssembleResult {
 }
 
 export function assemblePrompt(options: AssembleOptions): AssembleResult {
-  const { userInput, history, preset, lorebooks, userName, characterName, variables } = options;
+  const { userInput, history, preset, lorebooks, userName, characterName, variables, extraVariables, formatPrompt } = options;
 
   const allMatchedEntries: MatchedEntry[] = [];
   const scanText = userInput + ' ' + history.slice(-3).map(m => m.content).join(' ');
@@ -145,6 +147,17 @@ export function assemblePrompt(options: AssembleOptions): AssembleResult {
   const variablesBlock = formatVariablesForPrompt(variables || {});
   if (variablesBlock) {
     systemAccumulator += (systemAccumulator ? '\n\n' : '') + variablesBlock;
+  }
+
+  if (extraVariables && Object.keys(extraVariables).length > 0) {
+    const extraBlock = formatVariablesForPrompt(extraVariables);
+    if (extraBlock) {
+      systemAccumulator += (systemAccumulator ? '\n\n' : '') + extraBlock;
+    }
+  }
+
+  if (formatPrompt) {
+    systemAccumulator += (systemAccumulator ? '\n\n' : '') + formatPrompt;
   }
 
   if (systemAccumulator) {
