@@ -9,7 +9,7 @@ description: >-
 license: MIT
 metadata:
   author: User
-  version: 2.0.0
+  version: 3.0.0
   type: automated
   platforms: [react, vue, vanilla]
 ---
@@ -32,31 +32,48 @@ Add character cards and world info
 
 ## Automated Workflow
 
-### Phase 1: Auto-Detect (No user input needed)
+### Phase 1: 检测框架（自动）
 
-Check project structure:
 ```bash
-# Detect framework
-ls package.json 2>/dev/null && cat package.json | grep -E '"react"|"vue"'
+test -f package.json && grep -E '"react"|"vue"' package.json
 ls src/**/*.tsx 2>/dev/null && echo "REACT"
 ls src/**/*.vue 2>/dev/null && echo "VUE"
 ```
 
-### Phase 2: Auto-Install
+若都未匹配则视为 Vanilla。
 
-Install `dexie` dependency:
+### Phase 2: 询问安装选项（与用户交互）
+
+依次以单行问题询问，每个 Q 都给出 [] 内默认值，敲回车即采纳：
+
+1. **Q：启用游戏模式（正文+选项 UI）？[Y/n]**
+   - Y → 安装 GameView，settings.uiMode='game'
+   - N → 仅安装聊天模式，settings.uiMode='chat'
+
+2. **Q：使用默认 6 个标签 (maintext, option, sum, vars, thinking, think）？[Y/n]**
+   - Y → settings.customTags 取默认
+   - N → 让用户用空格列出标签名（必须包含 maintext 与 option，否则默认 UI 不可用）
+
+3. **Q：启用次 API（变量/总结分流）？[y/N]**
+   - Y → settings.api.secondary.enabled=true，让用户填 baseUrl/apiKey/model
+   - N → settings.api.secondary.enabled=false
+
+4. **Q：是否使用 schema-first 状态系统？[y/N]**
+   - 本期一律 N。占位以便未来扩展。
+
+### Phase 3: 安装 + 写文件（自动）
+
 ```bash
 npm install dexie
 ```
 
-### Phase 3: Auto-Generate
+然后按所选框架写入对应文件：
 
-Create all files automatically:
+- React: `src/sillytavern/`、`src/hooks/`、`src/components/SillyTavern/`
+- Vue: 同上但替换 `hooks/` 为 `composables/`，组件为 `.vue`（本期 v3 仅 React 走升级路径，Vue 保持 v2）
+- Vanilla: 同上但 `vanilla/sillytavern-store.ts`（本期保持 v2）
 
-1. **Core files** in `src/sillytavern/`
-2. **React hooks** in `src/hooks/useSillytavern.ts`
-3. **UI components** in `src/components/SillyTavern/`
-4. **Integration example** in your App.tsx
+具体文件清单见 §"File Generation Templates"。React 模板已抽到本仓库的 `templates/react/`，可直接复制。
 
 ---
 

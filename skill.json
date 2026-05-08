@@ -2,7 +2,7 @@
   "name": "sillytavern-web",
   "displayName": "SillyTavern Web Automator",
   "description": "Fully automated SillyTavern ecosystem integration. One command installs lorebooks, presets, and AI chat into any web project. Auto-detects framework, installs dependencies, generates all code.",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "author": "ariespo",
   "license": "MIT",
   "type": "automated",
