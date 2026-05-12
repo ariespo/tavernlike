@@ -37,7 +37,7 @@ export function PromptOrderEditor({
     <ol style={{ listStyle: 'none', padding: 0, margin: 0 }}>
       {value.map((item, idx) => (
         <li
-          key={item.identifier + idx}
+          key={item.identifier}
           style={{
             display: 'flex',
             alignItems: 'center',

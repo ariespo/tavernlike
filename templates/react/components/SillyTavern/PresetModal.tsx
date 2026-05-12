@@ -152,7 +152,10 @@ export function PresetModal({ onClose }: { onClose: () => void }) {
     setDraft(original);
   }, [original?.id]);
 
-  const dirty = draft && original && draft !== original;
+  const dirty = useMemo(() => {
+    if (!draft || !original) return false;
+    return draft.name !== original.name || JSON.stringify(draft.settings) !== JSON.stringify(original.settings);
+  }, [draft, original]);
 
   const patchSettings = (patch: Record<string, any>) => {
     if (!draft) return;

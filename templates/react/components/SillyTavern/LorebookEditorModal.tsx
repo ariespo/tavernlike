@@ -28,7 +28,17 @@ export function LorebookEditorModal({
     lorebook.entries[0]?.id ?? null,
   );
 
-  const dirty = useMemo(() => draft !== lorebook, [draft, lorebook]);
+  const dirty = useMemo(() => {
+    if (!draft) return false;
+    return (
+      draft.name !== lorebook.name ||
+      draft.entries.length !== lorebook.entries.length ||
+      draft.entries.some((e, i) => e !== lorebook.entries[i]) ||
+      draft.recursiveScanning !== lorebook.recursiveScanning ||
+      draft.caseSensitive !== lorebook.caseSensitive ||
+      draft.matchWholeWords !== lorebook.matchWholeWords
+    );
+  }, [draft, lorebook]);
 
   const selected = useMemo(
     () => draft.entries.find((e) => e.id === selectedId) ?? null,

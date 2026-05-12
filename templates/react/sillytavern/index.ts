@@ -9,4 +9,4 @@ export * from './prompt-assembler';
 export * from './importer';
 export * from './variables';
 
-export const VERSION = '2.0.0';
+export const VERSION = '3.0.0';
