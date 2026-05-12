@@ -4,6 +4,9 @@ import { ThinkingFold } from './ThinkingFold';
 import { MainTextPane } from './MainTextPane';
 import { OptionList } from './OptionList';
 import { HistoryDrawer } from './HistoryDrawer';
+import { SettingsModal } from './SettingsModal';
+import { LorebookModal } from './LorebookModal';
+import { PresetModal } from './PresetModal';
 
 export function GameView() {
   const st = useSillytavern();
@@ -46,6 +49,15 @@ export function GameView() {
       )}
 
       {historyOpen && <HistoryDrawer onClose={() => setHistoryOpen(false)} />}
+      {st.showSettings && st.settings && (
+        <SettingsModal
+          settings={st.settings}
+          updateSettings={st.updateSettings}
+          onClose={() => st.setShowSettings(false)}
+        />
+      )}
+      {st.showLorebooks && <LorebookModal onClose={() => st.setShowLorebooks(false)} />}
+      {st.showPresets && <PresetModal onClose={() => st.setShowPresets(false)} />}
     </div>
   );
 }
