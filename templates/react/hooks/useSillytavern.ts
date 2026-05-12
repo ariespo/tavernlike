@@ -25,7 +25,11 @@ import {
   saveSettings,
   saveChat,
   deleteChat,
+  deleteLorebook as deleteLorebookDb,
+  deletePreset as deletePresetDb,
 } from '../sillytavern/database';
+import { createDefaultLorebook } from '../sillytavern/editor-utils';
+import { createDefaultPreset } from '../sillytavern/types';
 
 const db = getDatabase();
 
@@ -196,6 +200,66 @@ export function useSillytavern() {
     setLorebooks((prev) => [...prev, book]);
   }, []);
 
+  const updateLorebook = useCallback(async (book: Lorebook) => {
+    const next: Lorebook = { ...book, updatedAt: Date.now() };
+    await saveLorebook(next);
+    setLorebooks((prev) => prev.map((b) => (b.id === next.id ? next : b)));
+  }, []);
+
+  const deleteLorebook = useCallback(async (id: string) => {
+    await deleteLorebookDb(id);
+    setLorebooks((prev) => prev.filter((b) => b.id !== id));
+    setSettings((prev) => {
+      if (!prev) return prev;
+      if (!prev.activeLorebookIds?.includes(id)) return prev;
+      const next = {
+        ...prev,
+        activeLorebookIds: prev.activeLorebookIds.filter((x) => x !== id),
+      };
+      saveSettings(next);
+      return next;
+    });
+  }, []);
+
+  const addLorebookFromDefault = useCallback(async (name: string) => {
+    const book = createDefaultLorebook(name);
+    await saveLorebook(book);
+    setLorebooks((prev) => [...prev, book]);
+    return book;
+  }, []);
+
+  const updatePreset = useCallback(async (preset: ChatPreset) => {
+    const next: ChatPreset = { ...preset, updatedAt: Date.now() };
+    await savePreset(next);
+    setPresets((prev) => prev.map((p) => (p.id === next.id ? next : p)));
+  }, []);
+
+  const deletePreset = useCallback(async (id: string) => {
+    await deletePresetDb(id);
+    setPresets((prev) => prev.filter((p) => p.id !== id));
+    setSettings((prev) => {
+      if (!prev) return prev;
+      if (prev.activePresetId !== id) return prev;
+      const next = { ...prev, activePresetId: null };
+      saveSettings(next);
+      return next;
+    });
+  }, []);
+
+  const addPresetFromDefault = useCallback(async (name: string) => {
+    const base = createDefaultPreset();
+    const preset: ChatPreset = {
+      id: crypto.randomUUID(),
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      ...base,
+      name,
+    };
+    await savePreset(preset);
+    setPresets((prev) => [...prev, preset]);
+    return preset;
+  }, []);
+
   const toggleLorebook = useCallback(
     (id: string) => {
       setSettings((prev) => {
@@ -355,6 +419,12 @@ export function useSillytavern() {
     addPreset,
     addLorebook,
     toggleLorebook,
+    updateLorebook,
+    deleteLorebook,
+    addLorebookFromDefault,
+    updatePreset,
+    deletePreset,
+    addPresetFromDefault,
 
     // v3 game mode
     sendGameMessage,
