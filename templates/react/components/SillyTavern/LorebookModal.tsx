@@ -3,13 +3,15 @@ import { useSillytavern } from '../../hooks/useSillytavern';
 import { getDatabase } from '../../sillytavern/database';
 import { importMultipleLorebooks, renameLorebook } from '../../sillytavern/importer';
 import type { Lorebook } from '../../sillytavern/types';
+import { LorebookEditorModal } from './LorebookEditorModal';
 
 const db = getDatabase();
 
 export function LorebookModal({ onClose }: { onClose: () => void }) {
-  const { lorebooks, toggleLorebook } = useSillytavern();
+  const { lorebooks, toggleLorebook, addLorebookFromDefault, deleteLorebook } = useSillytavern();
   const [list, setList] = useState<Lorebook[]>(lorebooks);
   const [activeIds, setActiveIds] = useState<Set<string>>(new Set());
+  const [editing, setEditing] = useState<Lorebook | null>(null);
 
   useEffect(() => {
     setList(lorebooks);
@@ -115,6 +117,27 @@ export function LorebookModal({ onClose }: { onClose: () => void }) {
           <span style={{ marginLeft: 8, fontSize: 12, color: '#888' }}>
             支持多选 .json 文件
           </span>
+          <button
+            onClick={async () => {
+              const name = prompt('新世界书名称', '新世界书');
+              if (!name) return;
+              const lb = await addLorebookFromDefault(name);
+              setList(await db.lorebooks.toArray());
+              setEditing(lb);
+            }}
+            style={{
+              marginLeft: 8,
+              padding: '8px 12px',
+              background: '#2c8',
+              color: '#fff',
+              border: 'none',
+              borderRadius: 4,
+              cursor: 'pointer',
+              fontSize: 14,
+            }}
+          >
+            + 新建
+          </button>
         </div>
 
         <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
@@ -211,10 +234,16 @@ export function LorebookModal({ onClose }: { onClose: () => void }) {
                   重命名
                 </button>
                 <button
+                  style={{ fontSize: 12, padding: '2px 8px' }}
+                  onClick={() => setEditing(lb)}
+                >
+                  ✎ 编辑
+                </button>
+                <button
                   style={{ fontSize: 12, padding: '2px 8px', color: '#c00' }}
                   onClick={async () => {
                     if (!confirm(`确定删除世界书 "${lb.name}"？`)) return;
-                    await db.lorebooks.delete(lb.id);
+                    await deleteLorebook(lb.id);
                     setList(await db.lorebooks.toArray());
                   }}
                 >
@@ -234,10 +263,19 @@ export function LorebookModal({ onClose }: { onClose: () => void }) {
               fontSize: 14,
             }}
           >
-            暂无世界书，请导入 JSON 文件
+            暂无世界书,请导入 JSON 文件或点击「+ 新建」
           </div>
         )}
       </aside>
+      {editing && (
+        <LorebookEditorModal
+          lorebook={editing}
+          onClose={async () => {
+            setEditing(null);
+            setList(await db.lorebooks.toArray());
+          }}
+        />
+      )}
     </div>
   );
 }
