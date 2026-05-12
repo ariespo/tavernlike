@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import type { ChatPreset } from '../../sillytavern/types';
 import { useSillytavern } from '../../hooks/useSillytavern';
 import { PromptOrderEditor, type PromptOrderItem } from './PromptOrderEditor';
@@ -148,12 +148,9 @@ export function PresetModal({ onClose }: { onClose: () => void }) {
   const [draft, setDraft] = useState<ChatPreset | null>(original);
   const [tab, setTab] = useState<Tab>('sampling');
 
-  if (draft && original && draft.id !== original.id) {
+  useEffect(() => {
     setDraft(original);
-  }
-  if (!draft && original) {
-    setDraft(original);
-  }
+  }, [original?.id]);
 
   const dirty = draft && original && draft !== original;
 
