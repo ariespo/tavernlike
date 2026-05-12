@@ -445,130 +445,33 @@ const showChatModal = ref(false);
 
 ### React — PresetModal.tsx
 
-```tsx
-import { useState } from 'react';
-import { useSillytavern } from '../../hooks/useSillytavern';
-import { importJsonFile, importPreset, exportPreset, exportToJson } from '../../sillytavern/importer';
-import type { ChatPreset } from '../../sillytavern';
+（源码位于 `templates/react/components/SillyTavern/PresetModal.tsx`）
 
-interface PresetModalProps {
-  onClose: () => void;
-}
+提供采样参数、Prompt 文本、自定义 Prompts、prompt_order 排序四个 Tab。
 
-export function PresetModal({ onClose }: PresetModalProps) {
-  const { presets, settings, updateSettings, savePreset, deletePreset } = useSillytavern();
-  const [editing, setEditing] = useState<ChatPreset | null>(null);
+### React — LorebookEditorModal.tsx
 
-  const handleImport = async () => {
-    const data = await importJsonFile<Record<string, any>>();
-    if (!data) return;
-    const imported = importPreset(data);
-    const newPreset: ChatPreset = {
-      ...imported,
-      id: crypto.randomUUID(),
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    } as ChatPreset;
-    await savePreset(newPreset);
-    if (!settings?.activePresetId) {
-      await updateSettings({ activePresetId: newPreset.id });
-    }
-  };
+（源码位于 `templates/react/components/SillyTavern/LorebookEditorModal.tsx`）
 
-  const handleExport = (preset: ChatPreset) => {
-    exportToJson(exportPreset(preset), `${preset.name}.json`);
-  };
+单本世界书的条目列表 + EntryForm 表单。从 LorebookModal 的「✎ 编辑」按钮进入。
 
-  const handleSelect = async (id: string) => {
-    await updateSettings({ activePresetId: id });
-  };
+### React — EntryForm.tsx
 
-  const handleDelete = async (id: string) => {
-    await deletePreset(id);
-    if (settings?.activePresetId === id) {
-      await updateSettings({ activePresetId: presets.find(p => p.id !== id)?.id || null });
-    }
-  };
+（源码位于 `templates/react/components/SillyTavern/EntryForm.tsx`）
 
-  const startEdit = (preset: ChatPreset) => setEditing({ ...preset });
+LorebookEntry 的字段编辑器,核心字段直显,高级字段在 `<details>` 折叠。
 
-  const saveEdit = async () => {
-    if (!editing) return;
-    await savePreset({ ...editing, updatedAt: Date.now() });
-    setEditing(null);
-  };
+### React — PromptOrderEditor.tsx
 
-  return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <header>
-          <h3>预设管理</h3>
-          <button onClick={onClose}>关闭</button>
-        </header>
-        <div className="preset-list">
-          <button onClick={handleImport}>导入 SillyTavern 预设</button>
-          {editing ? (
-            <div className="preset-editor">
-              <input
-                value={editing.name}
-                onChange={(e) => setEditing({ ...editing, name: e.target.value })}
-                placeholder="预设名称"
-              />
-              <label>
-                温度
-                <input
-                  type="number"
-                  value={editing.settings.temp_openai ?? 0.8}
-                  onChange={(e) => setEditing({
-                    ...editing,
-                    settings: { ...editing.settings, temp_openai: Number(e.target.value) }
-                  })}
-                  step={0.1}
-                />
-              </label>
-              <label>
-                Max Tokens
-                <input
-                  type="number"
-                  value={editing.settings.openai_max_tokens ?? 2048}
-                  onChange={(e) => setEditing({
-                    ...editing,
-                    settings: { ...editing.settings, openai_max_tokens: Number(e.target.value) }
-                  })}
-                />
-              </label>
-              <label>
-                模型
-                <input
-                  value={editing.settings.openai_model || ''}
-                  onChange={(e) => setEditing({
-                    ...editing,
-                    settings: { ...editing.settings, openai_model: e.target.value }
-                  })}
-                  placeholder="例如 gpt-3.5-turbo"
-                />
-              </label>
-              <button onClick={saveEdit}>保存</button>
-              <button onClick={() => setEditing(null)}>取消</button>
-            </div>
-          ) : (
-            <ul>
-              {presets.map((preset) => (
-                <li key={preset.id} className={preset.id === settings?.activePresetId ? 'active' : ''}>
-                  <span onClick={() => handleSelect(preset.id)}>{preset.name}</span>
-                  <button onClick={() => handleExport(preset)}>导出</button>
-                  <button onClick={() => startEdit(preset)}>编辑</button>
-                  <button onClick={() => handleDelete(preset.id)}>删除</button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-```
+（源码位于 `templates/react/components/SillyTavern/PromptOrderEditor.tsx`）
+
+prompt_order 数组的 ↑↓ 排序 + enabled 复选框。供 PresetModal 使用。
+
+### React — editor-utils.ts
+
+（源码位于 `templates/react/sillytavern/editor-utils.ts`）
+
+纯函数:`createDefaultEntry` / `createDefaultLorebook` / `applyEntryDefaults` / `updateEntry` / `removeEntry` / `movePromptItem` / `clampNumber`。供编辑器组件使用,无 IndexedDB 副作用。
 
 ### React — Chat.tsx
 
@@ -1034,7 +937,7 @@ When user runs `/sillytavern-web`:
    - React: copy `templates/react/sillytavern/` → `src/sillytavern/`, `templates/react/hooks/` → `src/hooks/`, `templates/react/components/SillyTavern/` → `src/components/SillyTavern/`
 
 5. **Create UI Components** (Auto - generate based on framework)
-   - React: `SettingsModal.tsx`, `LorebookModal.tsx`, `PresetModal.tsx`, `ChatModal.tsx`, `Chat.tsx`, `VariablePanel.tsx`
+   - React: `SettingsModal.tsx`, `LorebookModal.tsx`, `LorebookEditorModal.tsx`, `EntryForm.tsx`, `PresetModal.tsx`, `PromptOrderEditor.tsx`, `ChatModal.tsx`, `Chat.tsx`, `VariablePanel.tsx`
    - Vue: `SettingsModal.vue`, `LorebookModal.vue`, `PresetModal.vue`, `ChatModal.vue`, `Chat.vue`, `VariablePanel.vue`
    - Vanilla: inline example for settings/lorebook/preset/chat/variable UI
 
