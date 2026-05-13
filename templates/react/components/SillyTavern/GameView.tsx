@@ -7,6 +7,31 @@ import { HistoryDrawer } from './HistoryDrawer';
 import { SettingsModal } from './SettingsModal';
 import { LorebookModal } from './LorebookModal';
 import { PresetModal } from './PresetModal';
+import { VariablesModal } from './VariablesModal';
+import { Toast } from './Toast';
+
+function Badge({ count }: { count: number }) {
+  if (count <= 0) return null;
+  return (
+    <span
+      style={{
+        display: 'inline-block',
+        marginLeft: 6,
+        minWidth: 18,
+        padding: '0 5px',
+        background: '#2c8',
+        color: '#fff',
+        borderRadius: 9,
+        fontSize: 11,
+        lineHeight: '18px',
+        textAlign: 'center',
+        fontWeight: 'bold',
+      }}
+    >
+      {count}
+    </span>
+  );
+}
 
 export function GameView() {
   const st = useSillytavern();
@@ -16,6 +41,10 @@ export function GameView() {
     () => [...(st.activeChat?.messages ?? [])].reverse().find(m => m.role === 'assistant'),
     [st.activeChat],
   );
+
+  const lorebookCount = st.settings?.activeLorebookIds?.length ?? 0;
+  const messageCount = st.activeChat?.messages?.length ?? 0;
+  const variableCount = Object.keys(st.activeChat?.variables ?? {}).length;
 
   const isStreaming = st.streamState.isStreaming;
   const display = isStreaming
@@ -29,11 +58,18 @@ export function GameView() {
 
   return (
     <div className="st-gameview" style={{ maxWidth: 720, margin: '0 auto', padding: 16 }}>
-      <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-        <button onClick={() => setHistoryOpen(true)}>☰ 历史</button>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+        <button onClick={() => setHistoryOpen(true)}>
+          ☰ 历史<Badge count={messageCount} />
+        </button>
         <button onClick={() => st.openSettings()}>⚙ 设置</button>
-        <button onClick={() => st.openLorebooks()}>📖 世界书</button>
+        <button onClick={() => st.openLorebooks()}>
+          📖 世界书<Badge count={lorebookCount} />
+        </button>
         <button onClick={() => st.openPresets()}>✦ 预设</button>
+        <button onClick={() => st.openVariables()}>
+          📊 变量<Badge count={variableCount} />
+        </button>
         <button disabled={!lastAssistant} onClick={() => st.regenerateLast()}>↻ 重 roll</button>
       </div>
 
@@ -58,6 +94,8 @@ export function GameView() {
       )}
       {st.showLorebooks && <LorebookModal onClose={() => st.setShowLorebooks(false)} />}
       {st.showPresets && <PresetModal onClose={() => st.setShowPresets(false)} />}
+      {st.showVariables && <VariablesModal onClose={() => st.setShowVariables(false)} />}
+      <Toast message={st.toast} />
     </div>
   );
 }

@@ -46,6 +46,14 @@ export function useSillytavern() {
   const [showSettings, setShowSettings] = useState(false);
   const [showLorebooks, setShowLorebooks] = useState(false);
   const [showPresets, setShowPresets] = useState(false);
+  const [showVariables, setShowVariables] = useState(false);
+
+  // ---- toast ----
+  const [toast, setToast] = useState<string | null>(null);
+  const showToast = useCallback((message: string) => {
+    setToast(message);
+    setTimeout(() => setToast(null), 2000);
+  }, []);
 
   // ---- derived ----
   const activeChat = useMemo(
@@ -71,7 +79,7 @@ export function useSillytavern() {
       if (cancelled) return;
       setLorebooks(l);
       setPresets(p);
-      setSettings(s ?? { ...DEFAULT_SETTINGS });
+      setSettings(s ? { ...DEFAULT_SETTINGS, ...s } : { ...DEFAULT_SETTINGS });
       setChats(c);
       if (c.length > 0) setActiveChatId(c[0].id);
       setInitialized(true);
@@ -395,6 +403,20 @@ export function useSillytavern() {
     await sendGameMessage(activeChat.messages[targetIdx].content);
   }, [activeChat, sendGameMessage]);
 
+  const setChatVariables = useCallback(
+    async (vars: Record<string, any>) => {
+      if (!activeChat) return;
+      const next: ChatSession = {
+        ...activeChat,
+        variables: vars,
+        updatedAt: Date.now(),
+      };
+      await db.chats.put(next);
+      setChats((prev) => prev.map((c) => (c.id === next.id ? next : c)));
+    },
+    [activeChat]
+  );
+
   return {
     // state
     settings,
@@ -435,6 +457,7 @@ export function useSillytavern() {
     openSettings: () => setShowSettings(true),
     openLorebooks: () => setShowLorebooks(true),
     openPresets: () => setShowPresets(true),
+    openVariables: () => setShowVariables(true),
 
     // modal states (for binding)
     showSettings,
@@ -443,5 +466,14 @@ export function useSillytavern() {
     setShowLorebooks,
     showPresets,
     setShowPresets,
+    showVariables,
+    setShowVariables,
+
+    // variables
+    setChatVariables,
+
+    // toast
+    toast,
+    showToast,
   };
 }

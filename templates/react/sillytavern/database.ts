@@ -86,6 +86,50 @@ export async function clearAllData(): Promise<void> {
   dbInstance = null;
 }
 
+export interface FullBackup {
+  version: number;
+  exportedAt: number;
+  lorebooks: Lorebook[];
+  presets: ChatPreset[];
+  settings: AppSettings[];
+  chats: ChatSession[];
+}
+
+export async function exportAllData(): Promise<FullBackup> {
+  const db = getDatabase();
+  const [lorebooks, presets, settings, chats] = await Promise.all([
+    db.lorebooks.toArray(),
+    db.presets.toArray(),
+    db.settings.toArray(),
+    db.chats.toArray(),
+  ]);
+  return {
+    version: DB_VERSION,
+    exportedAt: Date.now(),
+    lorebooks,
+    presets,
+    settings,
+    chats,
+  };
+}
+
+export async function importAllData(backup: FullBackup): Promise<void> {
+  if (!backup || typeof backup !== 'object') {
+    throw new Error('备份格式无效');
+  }
+  const db = getDatabase();
+  await db.transaction('rw', db.lorebooks, db.presets, db.settings, db.chats, async () => {
+    await db.lorebooks.clear();
+    await db.presets.clear();
+    await db.settings.clear();
+    await db.chats.clear();
+    if (Array.isArray(backup.lorebooks)) await db.lorebooks.bulkPut(backup.lorebooks);
+    if (Array.isArray(backup.presets)) await db.presets.bulkPut(backup.presets);
+    if (Array.isArray(backup.settings)) await db.settings.bulkPut(backup.settings);
+    if (Array.isArray(backup.chats)) await db.chats.bulkPut(backup.chats);
+  });
+}
+
 export async function getLorebooks(): Promise<Lorebook[]> {
   return getDatabase().lorebooks.toArray();
 }

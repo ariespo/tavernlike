@@ -1,8 +1,11 @@
 import { useState } from 'react';
 import type { AppSettings } from '../../sillytavern/types';
 import { DEFAULT_FORMAT_PROMPT } from '../../sillytavern/types';
+import { fetchModels, testConnection } from '../../sillytavern/api-tools';
+import { exportAllData, importAllData, clearAllData } from '../../sillytavern/database';
+import { useSillytavern } from '../../hooks/useSillytavern';
 
-const TABS = ['primary', 'secondary', 'tags', 'prompt', 'display'] as const;
+const TABS = ['primary', 'secondary', 'tags', 'prompt', 'display', 'backup'] as const;
 type Tab = typeof TABS[number];
 
 const TAB_LABELS: Record<Tab, string> = {
@@ -11,6 +14,7 @@ const TAB_LABELS: Record<Tab, string> = {
   tags: '标签',
   prompt: '格式提示词',
   display: '显示',
+  backup: '备份',
 };
 
 export function SettingsModal({
@@ -23,6 +27,111 @@ export function SettingsModal({
   onClose: () => void;
 }) {
   const [tab, setTab] = useState<Tab>('primary');
+  const { showToast } = useSillytavern();
+
+  const [primaryModels, setPrimaryModels] = useState<string[]>([]);
+  const [secondaryModels, setSecondaryModels] = useState<string[]>([]);
+  const [busy, setBusy] = useState<string | null>(null);
+
+  const isDual = settings.apiMode === 'dual';
+  const secondary = settings.api.secondary ?? {
+    enabled: false,
+    baseUrl: '',
+    apiKey: '',
+    model: '',
+    temperature: 0.7,
+    maxTokens: 8000,
+  };
+
+  const updateSecondary = (patch: Partial<NonNullable<AppSettings['api']['secondary']>>) => {
+    updateSettings({
+      api: {
+        ...settings.api,
+        secondary: { ...secondary, ...patch },
+      },
+    });
+  };
+
+  const handleFetchModels = async (which: 'primary' | 'secondary') => {
+    setBusy(`fetch-${which}`);
+    try {
+      const target =
+        which === 'primary'
+          ? { baseUrl: settings.api.baseUrl, apiKey: settings.api.apiKey }
+          : { baseUrl: secondary.baseUrl, apiKey: secondary.apiKey };
+      const { models, source, error } = await fetchModels(target);
+      if (which === 'primary') setPrimaryModels(models);
+      else setSecondaryModels(models);
+      if (source === 'remote') {
+        showToast(`已获取 ${models.length} 个模型`);
+      } else if (error) {
+        showToast(`获取失败 (${error}),已显示常用模型`);
+      }
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handleTestConnection = async (which: 'primary' | 'secondary') => {
+    setBusy(`test-${which}`);
+    try {
+      const target =
+        which === 'primary'
+          ? { baseUrl: settings.api.baseUrl, apiKey: settings.api.apiKey, model: settings.api.model }
+          : { baseUrl: secondary.baseUrl, apiKey: secondary.apiKey, model: secondary.model };
+      const result = await testConnection(target);
+      if (result.ok) {
+        showToast(`${which === 'primary' ? '主' : '次'} API 连通性测试通过`);
+      } else if (result.status) {
+        alert(`测试失败: HTTP ${result.status}\n${result.errorBody ?? ''}`);
+      } else {
+        alert(`测试失败: ${result.error ?? '未知错误'}`);
+      }
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handleExportAll = async () => {
+    const data = await exportAllData();
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `sillytavern-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showToast('备份已导出');
+  };
+
+  const handleImportAll = () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json,application/json';
+    input.onchange = async (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (!file) return;
+      try {
+        const text = await file.text();
+        const backup = JSON.parse(text);
+        if (!confirm(`确认导入备份? 这将覆盖所有现有数据 (${(backup.lorebooks?.length ?? 0)} 世界书 / ${(backup.presets?.length ?? 0)} 预设 / ${(backup.chats?.length ?? 0)} 对话)。`)) return;
+        await importAllData(backup);
+        showToast('备份已导入,请刷新页面以加载');
+      } catch (err) {
+        alert('导入失败: ' + (err as Error).message);
+      }
+    };
+    input.click();
+  };
+
+  const handleClearAll = async () => {
+    if (!confirm('确定清除所有数据? 此操作不可恢复。')) return;
+    if (!confirm('再次确认: 所有世界书、预设、对话、设置都将被删除。')) return;
+    await clearAllData();
+    showToast('数据已清除,请刷新页面');
+  };
 
   return (
     <div
@@ -47,7 +156,7 @@ export function SettingsModal({
           <button onClick={onClose}>×</button>
         </header>
 
-        <div style={{ display: 'flex', gap: 4, marginBottom: 16, borderBottom: '1px solid #eee', paddingBottom: 8 }}>
+        <div style={{ display: 'flex', gap: 4, marginBottom: 16, borderBottom: '1px solid #eee', paddingBottom: 8, flexWrap: 'wrap' }}>
           {TABS.map((t) => (
             <button
               key={t}
@@ -59,6 +168,7 @@ export function SettingsModal({
                 color: tab === t ? '#fff' : '#333',
                 borderRadius: 4,
                 cursor: 'pointer',
+                fontSize: 13,
               }}
             >
               {TAB_LABELS[t]}
@@ -69,14 +179,28 @@ export function SettingsModal({
         {tab === 'primary' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <label>
+              API 模式
+              <select
+                value={settings.apiMode}
+                onChange={(e) => updateSettings({ apiMode: e.target.value as 'single' | 'dual' })}
+                style={{ width: '100%', padding: 6, marginTop: 4 }}
+              >
+                <option value="single">单 API (一个 LLM 处理所有任务)</option>
+                <option value="dual">双 API (主 API 剧情 + 次 API 变量)</option>
+              </select>
+              <small style={{ display: 'block', color: '#888', marginTop: 4, fontSize: 11 }}>
+                {isDual
+                  ? '双 API 模式: 主 API 负责剧情/对话, 次 API 负责变量更新等次要任务。'
+                  : '单 API 模式: 主 API 同时负责剧情和变量。'}
+              </small>
+            </label>
+            <label>
               Base URL
               <input
                 type="text"
                 value={settings.api.baseUrl}
                 onChange={(e) =>
-                  updateSettings({
-                    api: { ...settings.api, baseUrl: e.target.value },
-                  })
+                  updateSettings({ api: { ...settings.api, baseUrl: e.target.value } })
                 }
                 placeholder="https://api.openai.com/v1"
                 style={{ width: '100%', padding: 6, marginTop: 4 }}
@@ -88,9 +212,7 @@ export function SettingsModal({
                 type="password"
                 value={settings.api.apiKey}
                 onChange={(e) =>
-                  updateSettings({
-                    api: { ...settings.api, apiKey: e.target.value },
-                  })
+                  updateSettings({ api: { ...settings.api, apiKey: e.target.value } })
                 }
                 placeholder="sk-..."
                 style={{ width: '100%', padding: 6, marginTop: 4 }}
@@ -102,14 +224,44 @@ export function SettingsModal({
                 type="text"
                 value={settings.api.model}
                 onChange={(e) =>
-                  updateSettings({
-                    api: { ...settings.api, model: e.target.value },
-                  })
+                  updateSettings({ api: { ...settings.api, model: e.target.value } })
                 }
                 placeholder="gpt-3.5-turbo"
                 style={{ width: '100%', padding: 6, marginTop: 4 }}
               />
+              {primaryModels.length > 0 && (
+                <select
+                  onChange={(e) => {
+                    if (!e.target.value) return;
+                    updateSettings({ api: { ...settings.api, model: e.target.value } });
+                  }}
+                  style={{ width: '100%', padding: 6, marginTop: 4, background: '#f8f8f8' }}
+                  defaultValue=""
+                >
+                  <option value="">-- 选择模型 ({primaryModels.length}) --</option>
+                  {primaryModels.map((m) => (
+                    <option key={m} value={m}>{m}</option>
+                  ))}
+                </select>
+              )}
             </label>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button
+                onClick={() => handleFetchModels('primary')}
+                disabled={busy !== null}
+                style={{ padding: '6px 12px' }}
+              >
+                {busy === 'fetch-primary' ? '获取中…' : '获取模型列表'}
+              </button>
+              <button
+                onClick={() => handleTestConnection('primary')}
+                disabled={busy !== null}
+                style={{ padding: '6px 12px' }}
+              >
+                {busy === 'test-primary' ? '测试中…' : '测试连通性'}
+              </button>
+            </div>
+            <hr style={{ border: 'none', borderTop: '1px solid #eee', margin: '8px 0' }} />
             <label>
               用户名
               <input
@@ -133,92 +285,97 @@ export function SettingsModal({
 
         {tab === 'secondary' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <input
-                type="checkbox"
-                checked={settings.api.secondary?.enabled ?? false}
-                onChange={(e) =>
-                  updateSettings({
-                    api: {
-                      ...settings.api,
-                      secondary: {
-                        ...(settings.api.secondary ?? {
-                          baseUrl: '',
-                          apiKey: '',
-                          model: '',
-                        }),
-                        enabled: e.target.checked,
-                      },
-                    },
-                  })
-                }
-              />
-              启用次 API
-            </label>
-            {settings.api.secondary?.enabled && (
-              <>
-                <label>
-                  Base URL
-                  <input
-                    type="text"
-                    value={settings.api.secondary.baseUrl}
-                    onChange={(e) =>
-                      updateSettings({
-                        api: {
-                          ...settings.api,
-                          secondary: {
-                            ...settings.api.secondary!,
-                            baseUrl: e.target.value,
-                          },
-                        },
-                      })
-                    }
-                    placeholder="https://api.deepseek.com/v1"
-                    style={{ width: '100%', padding: 6, marginTop: 4 }}
-                  />
-                </label>
-                <label>
-                  API Key
-                  <input
-                    type="password"
-                    value={settings.api.secondary.apiKey}
-                    onChange={(e) =>
-                      updateSettings({
-                        api: {
-                          ...settings.api,
-                          secondary: {
-                            ...settings.api.secondary!,
-                            apiKey: e.target.value,
-                          },
-                        },
-                      })
-                    }
-                    placeholder="sk-..."
-                    style={{ width: '100%', padding: 6, marginTop: 4 }}
-                  />
-                </label>
-                <label>
-                  Model
-                  <input
-                    type="text"
-                    value={settings.api.secondary.model}
-                    onChange={(e) =>
-                      updateSettings({
-                        api: {
-                          ...settings.api,
-                          secondary: {
-                            ...settings.api.secondary!,
-                            model: e.target.value,
-                          },
-                        },
-                      })
-                    }
-                    placeholder="deepseek-chat"
-                    style={{ width: '100%', padding: 6, marginTop: 4 }}
-                  />
-                </label>
-              </>
+            {!isDual && (
+              <div style={{ padding: 10, background: '#fff8e1', border: '1px solid #ffd54f', borderRadius: 4, fontSize: 12, color: '#7a5800' }}>
+                当前为单 API 模式。在「主 API」面板切换到双 API 模式以启用此页面的配置。
+              </div>
             )}
+            <label>
+              Base URL
+              <input
+                type="text"
+                value={secondary.baseUrl}
+                onChange={(e) => updateSecondary({ baseUrl: e.target.value, enabled: true })}
+                placeholder="https://api.deepseek.com/v1"
+                style={{ width: '100%', padding: 6, marginTop: 4 }}
+              />
+            </label>
+            <label>
+              API Key
+              <input
+                type="password"
+                value={secondary.apiKey}
+                onChange={(e) => updateSecondary({ apiKey: e.target.value, enabled: true })}
+                placeholder="sk-..."
+                style={{ width: '100%', padding: 6, marginTop: 4 }}
+              />
+            </label>
+            <label>
+              Model
+              <input
+                type="text"
+                value={secondary.model}
+                onChange={(e) => updateSecondary({ model: e.target.value, enabled: true })}
+                placeholder="deepseek-chat"
+                style={{ width: '100%', padding: 6, marginTop: 4 }}
+              />
+              {secondaryModels.length > 0 && (
+                <select
+                  onChange={(e) => {
+                    if (!e.target.value) return;
+                    updateSecondary({ model: e.target.value, enabled: true });
+                  }}
+                  style={{ width: '100%', padding: 6, marginTop: 4, background: '#f8f8f8' }}
+                  defaultValue=""
+                >
+                  <option value="">-- 选择模型 ({secondaryModels.length}) --</option>
+                  {secondaryModels.map((m) => (
+                    <option key={m} value={m}>{m}</option>
+                  ))}
+                </select>
+              )}
+            </label>
+            <div style={{ display: 'flex', gap: 12 }}>
+              <label style={{ flex: 1 }}>
+                温度 (0-2)
+                <input
+                  type="number"
+                  min={0}
+                  max={2}
+                  step={0.1}
+                  value={secondary.temperature ?? 0.7}
+                  onChange={(e) => updateSecondary({ temperature: Number(e.target.value), enabled: true })}
+                  style={{ width: '100%', padding: 6, marginTop: 4 }}
+                />
+              </label>
+              <label style={{ flex: 1 }}>
+                Max Tokens
+                <input
+                  type="number"
+                  min={1}
+                  max={32768}
+                  value={secondary.maxTokens ?? 8000}
+                  onChange={(e) => updateSecondary({ maxTokens: Number(e.target.value), enabled: true })}
+                  style={{ width: '100%', padding: 6, marginTop: 4 }}
+                />
+              </label>
+            </div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button
+                onClick={() => handleFetchModels('secondary')}
+                disabled={busy !== null}
+                style={{ padding: '6px 12px' }}
+              >
+                {busy === 'fetch-secondary' ? '获取中…' : '获取模型列表'}
+              </button>
+              <button
+                onClick={() => handleTestConnection('secondary')}
+                disabled={busy !== null}
+                style={{ padding: '6px 12px' }}
+              >
+                {busy === 'test-secondary' ? '测试中…' : '测试连通性'}
+              </button>
+            </div>
           </div>
         )}
 
@@ -256,7 +413,7 @@ export function SettingsModal({
             </div>
             <button
               onClick={() => {
-                const v = prompt('新标签名（小写、无空格）');
+                const v = prompt('新标签名(小写、无空格)');
                 if (v && /^[a-z][a-z0-9_-]*$/.test(v)) {
                   updateSettings({ customTags: [...settings.customTags, v] });
                 }
@@ -315,6 +472,47 @@ export function SettingsModal({
                   </label>
                 ))}
               </div>
+            </fieldset>
+          </div>
+        )}
+
+        {tab === 'backup' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <fieldset style={{ border: '1px solid #2c8', borderRadius: 4, padding: 12 }}>
+              <legend style={{ fontSize: 14, fontWeight: 'bold', color: '#2c8' }}>导出</legend>
+              <p style={{ fontSize: 12, color: '#666', marginBottom: 8 }}>
+                将所有世界书、预设、设置、对话导出为单个 JSON 文件。
+              </p>
+              <button
+                onClick={handleExportAll}
+                style={{ padding: '8px 16px', background: '#2c8', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer' }}
+              >
+                导出全部数据
+              </button>
+            </fieldset>
+            <fieldset style={{ border: '1px solid #8a8acc', borderRadius: 4, padding: 12 }}>
+              <legend style={{ fontSize: 14, fontWeight: 'bold', color: '#6464a8' }}>导入</legend>
+              <p style={{ fontSize: 12, color: '#666', marginBottom: 8 }}>
+                从之前导出的备份文件恢复数据。<strong>会覆盖现有数据</strong>。
+              </p>
+              <button
+                onClick={handleImportAll}
+                style={{ padding: '8px 16px', background: '#6464a8', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer' }}
+              >
+                导入备份文件
+              </button>
+            </fieldset>
+            <fieldset style={{ border: '1px solid #c44', borderRadius: 4, padding: 12 }}>
+              <legend style={{ fontSize: 14, fontWeight: 'bold', color: '#c44' }}>清除</legend>
+              <p style={{ fontSize: 12, color: '#666', marginBottom: 8 }}>
+                清除所有本地存储数据。<strong>不可恢复</strong>。
+              </p>
+              <button
+                onClick={handleClearAll}
+                style={{ padding: '8px 16px', background: '#c44', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer' }}
+              >
+                清除所有数据
+              </button>
             </fieldset>
           </div>
         )}

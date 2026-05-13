@@ -144,12 +144,16 @@ export interface ApiSettings {
     baseUrl: string;
     apiKey: string;
     model: string;
+    temperature?: number;
+    maxTokens?: number;
   };
 }
 
 export interface AppSettings {
   key?: string;
   api: ApiSettings;
+  /** 'single' = primary API handles all tasks. 'dual' = primary handles story, secondary handles variables. */
+  apiMode: 'single' | 'dual';
   activePresetId: string | null;
   activeLorebookIds: string[];
   userName: string;
@@ -183,6 +187,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
     model: 'gpt-3.5-turbo',
     timeout: 60000,
   },
+  apiMode: 'single',
   activePresetId: null,
   activeLorebookIds: [],
   userName: '用户',
